@@ -6,6 +6,7 @@ export default defineConfig({
     name: 'Mi Extension',
     version: '0.0.1',
     permissions: ['activeTab', 'storage', 'downloads'],
+    host_permissions: ['*://media.redgifs.com/*'],
     // host_permissions: ['*://*.ejemplo.com/*'],   // sitios que la extensión puede leer o modificar
     // Solo si usas ffmpeg.wasm:
      content_security_policy: {

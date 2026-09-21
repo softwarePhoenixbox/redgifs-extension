@@ -1,4 +1,5 @@
-import { exportDbBase64, getTotal, saveLink } from '../utils/links-db';
+import { buildHtml, buildXlsx } from '../utils/exporters';
+import { bytesToBase64, exportDbBase64, getTotal, listLinks, saveLink } from '../utils/links-db';
 import type { RgRequest, RgResponse } from '../utils/messages';
 
 const ID_RE = /^[\w-]+$/;
@@ -33,9 +34,11 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     }
     case 'RG_SAVE_LINK': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
+      if (msg.imageUrl && !isRedgifsUrl(msg.imageUrl)) throw new Error('Datos inválidos');
       const { inserted, total } = await saveLink({
         gifId: msg.id,
         url: msg.url,
+        imageUrl: msg.imageUrl,
         pageUrl: msg.pageUrl,
       });
       return { ok: true, inserted, total };
@@ -43,7 +46,30 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     case 'RG_STATS':
       return { ok: true, total: await getTotal() };
     case 'RG_EXPORT_DB':
-      return { ok: true, base64: await exportDbBase64() };
+      switch (msg.format) {
+        case 'sqlite':
+          return { ok: true, base64: await exportDbBase64(), filename: 'redgifs-links.sqlite', mime: 'application/vnd.sqlite3' };
+        case 'db':
+          return { ok: true, base64: await exportDbBase64(), filename: 'redgifs-links.db', mime: 'application/octet-stream' };
+        case 'xlsx':
+          return {
+            ok: true,
+            base64: bytesToBase64(buildXlsx(await listLinks())),
+            filename: 'redgifs-links.xlsx',
+            mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          };
+        case 'html': {
+          const html = await buildHtml(await listLinks());
+          return {
+            ok: true,
+            base64: bytesToBase64(new TextEncoder().encode(html)),
+            filename: 'redgifs-links.html',
+            mime: 'text/html;charset=utf-8',
+          };
+        }
+        default:
+          throw new Error('Formato desconocido');
+      }
     default:
       throw new Error('Mensaje desconocido');
   }

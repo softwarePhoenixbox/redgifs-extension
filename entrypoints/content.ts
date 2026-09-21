@@ -1,4 +1,4 @@
-import type { RgRequest, RgResponse } from '../utils/messages';
+import type { ExportFormat, RgRequest, RgResponse } from '../utils/messages';
 
 export default defineContentScript({
   matches: ['*://*.redgifs.com/*'],
@@ -13,6 +13,8 @@ export default defineContentScript({
         urls: {
           hd?: string;
           sd?: string;
+          thumbnail?: string; // ej.: .../Nombre-mobile.jpg
+          poster?: string;
         };
       };
     }
@@ -115,7 +117,12 @@ export default defineContentScript({
       }
     }
 
-    async function getValidLink(id: string, retry = true): Promise<string | null> {
+    interface GifLinks {
+      videoUrl: string;
+      imageUrl: string;
+    }
+
+    async function getValidLink(id: string, retry = true): Promise<GifLinks | null> {
       if (!authToken) await refreshAuth();
       try {
         const response = await fetch(`${API}/gifs/${id}`, {
@@ -128,7 +135,12 @@ export default defineContentScript({
         }
         if (!response.ok) return null;
         const data = (await response.json()) as GifResponse;
-        return data.gif.urls.hd ?? data.gif.urls.sd ?? null;
+        const { hd, sd, thumbnail, poster } = data.gif.urls;
+        const videoUrl = hd ?? sd;
+        if (!videoUrl) return null;
+        // Si la API no trae miniatura, se usa el patrón <Nombre>-mobile.jpg
+        const imageUrl = thumbnail ?? poster ?? videoUrl.replace(/\.[a-z0-9]+$/i, '-mobile.jpg');
+        return { videoUrl, imageUrl };
       } catch (e) {
         console.error('[RG Scroller] Error al obtener el video', e);
         return null;
@@ -146,7 +158,7 @@ export default defineContentScript({
       );
     }
 
-    function renderResult(id: string, url: string): void {
+    function renderResult(id: string, url: string, imageUrl: string): void {
       const card = createEl(
         'div',
         `background:#2a2a2a; padding:12px; border-radius:8px; border-left:4px solid ${GREEN}; width:100%; animation:zoomIn 0.3s; display:flex; flex-direction:column; gap:10px;`,
@@ -193,18 +205,51 @@ export default defineContentScript({
       autoCheck.checked = autoSave;
       autoLabel.append(autoCheck, document.createTextNode('Auto-guardar'));
       const totalEl = createEl('span', 'color:#bbb;', 'Guardados: …');
-      const exportButton = createEl(
-        'button',
-        'background:#3a3a3a; color:#ddd; border:1px solid #555; border-radius:4px; cursor:pointer; font-size:10px; padding:3px 6px; font-family:inherit;',
-        'Exportar .sqlite',
+      dbRow.append(autoLabel, totalEl);
+
+      // Exportar: .sqlite, .db, Excel y HTML (con imágenes incrustadas)
+      const exportRow = createEl(
+        'div',
+        'display:flex; align-items:center; gap:4px; font-size:10px; color:#bbb;',
+        'Exportar:',
       );
-      dbRow.append(autoLabel, totalEl, exportButton);
-      dbBox.append(saveButton, dbStatus, dbRow);
+      const exportButtons: HTMLButtonElement[] = [];
+      const exportFormats: Array<[ExportFormat, string]> = [
+        ['sqlite', '.sqlite'],
+        ['db', '.db'],
+        ['xlsx', 'Excel'],
+        ['html', 'HTML'],
+      ];
+      for (const [format, label] of exportFormats) {
+        const btn = createEl(
+          'button',
+          'flex:1; background:#3a3a3a; color:#ddd; border:1px solid #555; border-radius:4px; cursor:pointer; font-size:10px; padding:4px 0; font-family:inherit;',
+          label,
+        );
+        btn.addEventListener('click', async () => {
+          exportButtons.forEach(b => (b.disabled = true));
+          setStatus(
+            dbStatus,
+            format === 'html' ? 'Generando HTML (descargando imágenes)...' : 'Exportando...',
+          );
+          const res = await send({ type: 'RG_EXPORT_DB', format });
+          if (res.ok && res.base64 && res.filename) {
+            saveBase64AsFile(res.base64, res.filename, res.mime ?? 'application/octet-stream');
+            setStatus(dbStatus, `✔ Exportado: ${res.filename}`, 'ok');
+          } else if (!res.ok) {
+            setStatus(dbStatus, `✖ ${res.error}`, 'error');
+          }
+          exportButtons.forEach(b => (b.disabled = false));
+        });
+        exportButtons.push(btn);
+        exportRow.append(btn);
+      }
+      dbBox.append(saveButton, dbStatus, dbRow, exportRow);
 
       async function saveCurrentLink(): Promise<void> {
         saveButton.disabled = true;
         setStatus(dbStatus, 'Guardando...');
-        const res = await send({ type: 'RG_SAVE_LINK', id, url, pageUrl: location.href });
+        const res = await send({ type: 'RG_SAVE_LINK', id, url, imageUrl, pageUrl: location.href });
         if (res.ok) {
           setStatus(dbStatus, res.inserted ? '✔ Link guardado' : 'ℹ Este link ya estaba guardado', 'ok');
           if (res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
@@ -220,18 +265,6 @@ export default defineContentScript({
         autoSave = autoCheck.checked;
         void browser.storage.local.set({ [AUTO_SAVE_KEY]: autoSave });
         if (autoSave) void saveCurrentLink();
-      });
-
-      exportButton.addEventListener('click', async () => {
-        exportButton.disabled = true;
-        const res = await send({ type: 'RG_EXPORT_DB' });
-        if (res.ok && res.base64) {
-          saveBase64AsFile(res.base64, 'redgifs-links.sqlite', 'application/vnd.sqlite3');
-          setStatus(dbStatus, '✔ Base exportada: redgifs-links.sqlite', 'ok');
-        } else if (!res.ok) {
-          setStatus(dbStatus, `✖ ${res.error}`, 'error');
-        }
-        exportButton.disabled = false;
       });
 
       // --- Zona VERDE: solo abre el video (media.redgifs.com/....mp4) ---
@@ -263,10 +296,10 @@ export default defineContentScript({
       currentActiveId = id;
 
       renderLoading(id);
-      const realUrl = await getValidLink(id);
+      const links = await getValidLink(id);
 
       // Verificamos que sigamos en el mismo video antes de mostrar el link
-      if (realUrl && currentActiveId === id) renderResult(id, realUrl);
+      if (links && currentActiveId === id) renderResult(id, links.videoUrl, links.imageUrl);
     }
 
     // Agrupa muchos eventos seguidos en una sola ejecución por frame

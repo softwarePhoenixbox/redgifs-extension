@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS links (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   gif_id     TEXT NOT NULL UNIQUE,
   url        TEXT NOT NULL,
+  image_url  TEXT,
   page_url   TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -68,7 +69,18 @@ async function openDb(): Promise<Database> {
   const saved = await idbGet(IDB_KEY);
   const db = saved ? new SQL.Database(saved) : new SQL.Database();
   db.run(SCHEMA);
+  await migrate(db);
   return db;
+}
+
+// Bases guardadas con la versión anterior no tienen la columna image_url
+async function migrate(db: Database): Promise<void> {
+  const columns = db.exec('PRAGMA table_info(links)')[0]?.values.map(row => row[1]) ?? [];
+  if (columns.includes('image_url')) return;
+  db.run('ALTER TABLE links ADD COLUMN image_url TEXT');
+  // Rellena las filas viejas con el patrón <Nombre>-mobile.jpg
+  db.run("UPDATE links SET image_url = replace(url, '.mp4', '-mobile.jpg') WHERE url LIKE '%.mp4'");
+  await persist(db);
 }
 
 function getDb(): Promise<Database> {
@@ -100,18 +112,32 @@ function countRows(db: Database): number {
 export interface SaveLinkInput {
   gifId: string;
   url: string;
+  imageUrl?: string;
   pageUrl: string;
 }
 
-export function saveLink({ gifId, url, pageUrl }: SaveLinkInput) {
+export function saveLink({ gifId, url, imageUrl, pageUrl }: SaveLinkInput) {
   return enqueue(async db => {
-    db.run('INSERT OR IGNORE INTO links (gif_id, url, page_url) VALUES (?, ?, ?)', [
-      gifId,
-      url,
-      pageUrl,
-    ]);
-    const inserted = db.getRowsModified() > 0;
-    if (inserted) await persist(db);
+    const existing = db.exec('SELECT image_url FROM links WHERE gif_id = ?', [gifId]);
+    const row = existing[0]?.values[0];
+    let inserted = false;
+    let changed = false;
+
+    if (!row) {
+      db.run('INSERT INTO links (gif_id, url, image_url, page_url) VALUES (?, ?, ?, ?)', [
+        gifId,
+        url,
+        imageUrl ?? null,
+        pageUrl,
+      ]);
+      inserted = changed = true;
+    } else if (imageUrl && !row[0]) {
+      // Link ya guardado sin imagen: se completa
+      db.run('UPDATE links SET image_url = ? WHERE gif_id = ?', [imageUrl, gifId]);
+      changed = true;
+    }
+
+    if (changed) await persist(db);
     return { inserted, total: countRows(db) };
   });
 }
@@ -120,15 +146,41 @@ export function getTotal(): Promise<number> {
   return enqueue(db => countRows(db));
 }
 
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 // El archivo .sqlite completo, en base64 (para mandarlo por mensaje).
 export function exportDbBase64(): Promise<string> {
+  return enqueue(db => bytesToBase64(db.export()));
+}
+
+export interface LinkRow {
+  id: number;
+  gifId: string;
+  url: string;
+  imageUrl: string | null;
+  pageUrl: string | null;
+  createdAt: string;
+}
+
+export function listLinks(): Promise<LinkRow[]> {
   return enqueue(db => {
-    const bytes = db.export();
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-    }
-    return btoa(binary);
+    const res = db.exec(
+      'SELECT id, gif_id, url, image_url, page_url, created_at FROM links ORDER BY id',
+    );
+    return (res[0]?.values ?? []).map(r => ({
+      id: Number(r[0]),
+      gifId: String(r[1]),
+      url: String(r[2]),
+      imageUrl: r[3] === null ? null : String(r[3]),
+      pageUrl: r[4] === null ? null : String(r[4]),
+      createdAt: String(r[5]),
+    }));
   });
 }
