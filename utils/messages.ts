@@ -18,6 +18,7 @@ export type RgRequest =
       likes?: string;
     }
   | { type: 'RG_STATS' }
+  | { type: 'RG_CHECK_LINK'; id: string }
   | { type: 'RG_EXPORT_DB'; format: ExportFormat }
   | { type: 'RG_IMPORT_DB'; base64: string };
 
@@ -27,6 +28,7 @@ export type RgResponse =
       downloadId?: number; // RG_DOWNLOAD
       inserted?: boolean; // RG_SAVE_LINK (false = el link ya estaba guardado)
       total?: number; // RG_SAVE_LINK, RG_STATS y RG_IMPORT_DB
+      exists?: boolean; // RG_CHECK_LINK
       base64?: string; // RG_EXPORT_DB
       filename?: string; // RG_EXPORT_DB
       mime?: string; // RG_EXPORT_DB

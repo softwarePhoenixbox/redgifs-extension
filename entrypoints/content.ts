@@ -435,7 +435,18 @@ export default defineContentScript({
       void send({ type: 'RG_STATS' }).then(res => {
         if (res.ok && res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
       });
-      if (autoSave) void saveCurrentLink();
+      if (autoSave) {
+        void saveCurrentLink();
+      } else {
+        // Chequeo automático: si este video ya está en la DB (de una sesión
+        // anterior o de un archivo importado), avisamos sin que el usuario
+        // tenga que apretar "Guardar".
+        void send({ type: 'RG_CHECK_LINK', id }).then(res => {
+          if (res.ok && res.exists && currentActiveId === id) {
+            setStatus(dbStatus, 'ℹ Este link ya estaba guardado', 'ok');
+          }
+        });
+      }
     }
 
     // ---------- Lógica principal ----------

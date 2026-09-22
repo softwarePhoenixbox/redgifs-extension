@@ -285,6 +285,15 @@ export function getTotal(): Promise<number> {
   return enqueue(db => countRows(db));
 }
 
+// Chequea si un gif_id ya está guardado, para mostrar el aviso apenas se
+// detecta el video (sin esperar a que el usuario apriete "Guardar").
+export function linkExists(gifId: string): Promise<boolean> {
+  return enqueue(db => {
+    const res = db.exec('SELECT 1 FROM links WHERE gif_id = ? LIMIT 1', [gifId]);
+    return (res[0]?.values.length ?? 0) > 0;
+  });
+}
+
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;

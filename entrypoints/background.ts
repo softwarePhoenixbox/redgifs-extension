@@ -1,5 +1,5 @@
 import { buildHtml, buildXlsx } from '../utils/exporters';
-import { bytesToBase64, exportDbBase64, getTotal, importDb, listLinks, saveLink } from '../utils/links-db';
+import { bytesToBase64, exportDbBase64, getTotal, importDb, linkExists, listLinks, saveLink } from '../utils/links-db';
 import type { RgRequest, RgResponse } from '../utils/messages';
 
 const ID_RE = /^[\w-]+$/;
@@ -55,6 +55,8 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     }
     case 'RG_STATS':
       return { ok: true, total: await getTotal() };
+    case 'RG_CHECK_LINK':
+      return { ok: true, exists: await linkExists(msg.id) };
     case 'RG_IMPORT_DB': {
       const { imported, updated, total } = await importDb(base64ToBytes(msg.base64));
       return { ok: true, imported, updated, total };
