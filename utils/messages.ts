@@ -19,6 +19,14 @@ export interface BulkLinkInput {
   likes?: string;
 }
 
+// Un item tildado en la grilla, tal como lo muestra el popup mientras
+// todavía no se guardó (RG_LIST_GRID_SELECTION).
+export interface GridSelectionItem {
+  id: string;
+  title: string | null;
+  saved: boolean; // true = ya se guardó en esta sesión (marcado en azul en la página)
+}
+
 export type RgRequest =
   | { type: 'RG_DOWNLOAD'; id: string; url: string }
   | {
@@ -49,7 +57,14 @@ export type RgRequest =
   // cuántos hay seleccionados), sin cambiar nada. Se usa al abrir el popup,
   // porque su estado de React se reinicia cada vez que se cierra y el
   // content script es la única fuente de verdad real.
-  | { type: 'RG_GET_GRID_SELECT_STATE' };
+  | { type: 'RG_GET_GRID_SELECT_STATE' }
+  // Popup -> content script: pide el detalle (id + título si hay) de lo
+  // seleccionado ahora mismo en la grilla, para mostrarlo en el popup sin
+  // que el usuario tenga que volver a la página a revisar qué tildó.
+  | { type: 'RG_LIST_GRID_SELECTION' }
+  // Popup -> content script: destilda un item puntual sin desactivar el
+  // modo selección ni tocar el resto.
+  | { type: 'RG_DESELECT_GRID_ITEM'; id: string };
 
 export type RgResponse =
   | {
@@ -69,6 +84,9 @@ export type RgResponse =
       inserted_count?: number; // RG_SAVE_BULK (links nuevos)
       updated_count?: number; // RG_SAVE_BULK (links que ya existían y se actualizaron)
       enabled?: boolean; // RG_TOGGLE_GRID_SELECT / RG_GET_GRID_SELECT_STATE (estado del modo selección)
-      selected_count?: number; // RG_GET_GRID_SELECT_STATE (cuántos hay tildados ahora mismo)
+      selected_count?: number; // RG_GET_GRID_SELECT_STATE (total marcados: pendientes + guardados)
+      pending_count?: number; // RG_GET_GRID_SELECT_STATE (marcados que todavía no se guardaron)
+      saved_count?: number; // RG_GET_GRID_SELECT_STATE (marcados que ya se guardaron en esta sesión)
+      selection?: GridSelectionItem[]; // RG_LIST_GRID_SELECTION
     }
   | { ok: false; error: string };

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LinkRow } from '../../utils/links-db';
-import type { ExportFormat, RgRequest, RgResponse } from '../../utils/messages';
+import type { ExportFormat, GridSelectionItem, RgRequest, RgResponse } from '../../utils/messages';
 
 async function send(request: RgRequest): Promise<RgResponse> {
   try {
@@ -61,31 +61,59 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [gridSelectMode, setGridSelectMode] = useState(false);
   const [selectedCount, setSelectedCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [savedCount, setSavedCount] = useState(0);
+  const [selection, setSelection] = useState<GridSelectionItem[]>([]);
 
   // El estado de este popup se reinicia cada vez que se cierra y se vuelve
   // a abrir, pero el modo selección vive en el content script de la
   // pestaña. Sin esto, el botón podía mostrar "desactivado" cuando en
-  // realidad ya estaba activo, y un click de más volvía a togglear:
-  // eso era lo que se veía como "duplicado" al guardar.
+  // realidad ya estaba activo, y el usuario no se enteraba de lo que ya
+  // había tildado en la grilla.
   async function syncGridSelectState() {
     const res = await sendToActiveTab({ type: 'RG_GET_GRID_SELECT_STATE' });
     if (res.ok) {
       setGridSelectMode(res.enabled ?? false);
       setSelectedCount(res.selected_count ?? 0);
+      setPendingCount(res.pending_count ?? res.selected_count ?? 0);
+      setSavedCount(res.saved_count ?? 0);
+      if (res.enabled && (res.selected_count ?? 0) > 0) {
+        const list = await sendToActiveTab({ type: 'RG_LIST_GRID_SELECTION' });
+        if (list.ok) setSelection(list.selection ?? []);
+      } else {
+        setSelection([]);
+      }
     }
     // Si falla (pestaña sin redgifs.com abierta, por ejemplo), dejamos el
     // botón en su estado por defecto sin mostrar error: no es una acción
     // que el usuario haya pedido, es solo la sincronización inicial.
   }
 
+  async function handleDeselectItem(id: string) {
+    const res = await sendToActiveTab({ type: 'RG_DESELECT_GRID_ITEM', id });
+    if (res.ok) {
+      setSelectedCount(res.selected_count ?? 0);
+      setSelection(prev => prev.filter(item => item.id !== id));
+    }
+  }
+
   async function handleToggleGridSelect() {
     const next = !gridSelectMode;
     const res = await sendToActiveTab({ type: 'RG_TOGGLE_GRID_SELECT', enabled: next });
     if (res.ok) {
-      setGridSelectMode(res.enabled ?? next);
+      const enabled = res.enabled ?? next;
+      setGridSelectMode(enabled);
       setSelectedCount(res.selected_count ?? 0);
+      setPendingCount(res.pending_count ?? res.selected_count ?? 0);
+      setSavedCount(res.saved_count ?? 0);
+      if (enabled && (res.selected_count ?? 0) > 0) {
+        const list = await sendToActiveTab({ type: 'RG_LIST_GRID_SELECTION' });
+        if (list.ok) setSelection(list.selection ?? []);
+      } else {
+        setSelection([]);
+      }
       setStatus({
-        text: (res.enabled ?? next)
+        text: enabled
           ? '🔲 Selección activada: tocá los gifs en la página y guardalos desde ahí'
           : 'Selección desactivada',
         kind: 'ok',
@@ -106,6 +134,22 @@ export default function App() {
   useEffect(() => {
     void loadLinks();
     void syncGridSelectState();
+
+    // El popup puede quedar abierto mientras el usuario interactúa con la
+    // barra flotante de la página (guarda, limpia selección, activa/
+    // desactiva, etc). Sin este polling, el botón y la lista se quedaban
+    // mostrando el estado de cuando se abrió el popup, no el real.
+    const interval = setInterval(() => void syncGridSelectState(), 2000);
+    function onVisible() {
+      if (document.visibilityState === 'visible') void syncGridSelectState();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -195,9 +239,65 @@ export default function App() {
           }}
         >
           {gridSelectMode
-            ? `🔲 Selección ACTIVA (${selectedCount}) — tocá para desactivar`
+            ? savedCount > 0
+              ? `🔲 ${pendingCount} pendientes · ${savedCount} guardados 💾`
+              : `🔲 Selección ACTIVA (${pendingCount}) — tocá para desactivar`
             : '🔲 Seleccionar en la página (tags/usuarios)'}
         </button>
+        {gridSelectMode && selection.length > 0 && (
+          <div
+            style={{
+              maxHeight: 130,
+              overflowY: 'auto',
+              background: '#1c1c1c',
+              border: '1px solid #444',
+              borderRadius: 6,
+              marginBottom: 8,
+              padding: '4px 6px',
+            }}
+          >
+            {selection.map(item => (
+              <div
+                key={item.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 2px',
+                  borderBottom: '1px solid #262626',
+                }}
+              >
+                <span style={{ color: item.saved ? '#2f9bff' : '#00ff00' }}>{item.saved ? '💾' : '✓'}</span>
+                <span
+                  style={{
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: item.saved ? '#888' : '#ddd',
+                  }}
+                  title={item.title ?? item.id}
+                >
+                  {item.title ?? item.id}
+                </span>
+                <button
+                  onClick={() => void handleDeselectItem(item.id)}
+                  title="Quitar de la selección"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#ff8b8b',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    padding: '0 4px',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}

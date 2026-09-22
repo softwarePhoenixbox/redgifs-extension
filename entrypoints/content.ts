@@ -600,6 +600,7 @@ export default defineContentScript({
     const GRID_BAR_ID = 'rg-grid-bar';
     let gridSelectMode = false;
     const selectedIds = new Map<string, HTMLElement>(); // id -> tileItem root
+    const savedIds = new Set<string>(); // ids ya guardados con éxito en esta sesión (siguen marcados, en otro color)
 
     function findGridItems(): HTMLElement[] {
       return Array.from(document.querySelectorAll<HTMLElement>('[data-feed-item-id]'));
@@ -626,30 +627,58 @@ export default defineContentScript({
     document.body.appendChild(gridBar);
 
     function updateGridBar(): void {
-      gridBarCount.textContent = `${selectedIds.size} seleccionados`;
+      const pending = Array.from(selectedIds.keys()).filter(id => !savedIds.has(id)).length;
+      gridBarCount.textContent =
+        savedIds.size > 0 ? `${pending} pendientes · ${savedIds.size} guardados 💾` : `${pending} seleccionados`;
       gridBar.style.display = gridSelectMode ? 'flex' : 'none';
-      gridBarSave.toggleAttribute('disabled', selectedIds.size === 0);
+      gridBarSave.toggleAttribute('disabled', pending === 0);
     }
 
-    function checkboxCss(checked: boolean): string {
-      return `position:absolute; top:6px; left:6px; z-index:5; width:22px; height:22px; border-radius:6px; border:2px solid ${
-        checked ? GREEN : '#fff'
-      }; background:${checked ? GREEN : 'rgba(0,0,0,0.55)'}; box-shadow:0 1px 4px rgba(0,0,0,0.6); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:#000;`;
+    const BLUE_SAVED = '#2f9bff';
+
+    type CheckState = 'unselected' | 'selected' | 'saved';
+
+    function checkState(id: string): CheckState {
+      if (savedIds.has(id)) return 'saved';
+      if (selectedIds.has(id)) return 'selected';
+      return 'unselected';
     }
 
-    function toggleSelection(id: string, root: HTMLElement, box: HTMLElement): void {
-      if (selectedIds.has(id)) {
-        selectedIds.delete(id);
-        box.style.cssText = checkboxCss(false);
-        box.textContent = '';
+    function checkboxCss(state: CheckState): string {
+      const color = state === 'saved' ? BLUE_SAVED : state === 'selected' ? GREEN : '#fff';
+      const bg = state === 'unselected' ? 'rgba(0,0,0,0.55)' : color;
+      return `position:absolute; top:6px; left:6px; z-index:5; width:22px; height:22px; border-radius:6px; border:2px solid ${color}; background:${bg}; box-shadow:0 1px 4px rgba(0,0,0,0.6); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:#000;`;
+    }
+
+    function checkboxLabel(state: CheckState): string {
+      return state === 'saved' ? '💾' : state === 'selected' ? '✓' : '';
+    }
+
+    function applyCheckState(id: string, root: HTMLElement, box: HTMLElement): void {
+      const state = checkState(id);
+      box.style.cssText = checkboxCss(state);
+      box.textContent = checkboxLabel(state);
+      if (state === 'unselected') {
         root.style.outline = '';
       } else {
-        selectedIds.set(id, root);
-        box.style.cssText = checkboxCss(true);
-        box.textContent = '✓';
-        root.style.outline = `3px solid ${GREEN}`;
+        root.style.outline = `3px solid ${state === 'saved' ? BLUE_SAVED : GREEN}`;
         root.style.outlineOffset = '-3px';
       }
+    }
+
+    // Tocar un item ya guardado (💾, azul) lo saca del todo de la marca:
+    // vuelve a "unselected" en vez de pasar a "selected" de nuevo, así no
+    // se intenta re-guardar por error tocándolo sin querer.
+    function toggleSelection(id: string, root: HTMLElement, box: HTMLElement): void {
+      if (savedIds.has(id)) {
+        savedIds.delete(id);
+        selectedIds.delete(id);
+      } else if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+      } else {
+        selectedIds.set(id, root);
+      }
+      applyCheckState(id, root, box);
       updateGridBar();
     }
 
@@ -672,13 +701,10 @@ export default defineContentScript({
         const computed = getComputedStyle(item);
         if (computed.position === 'static') item.style.position = 'relative';
 
-        const box = createEl('div', checkboxCss(selectedIds.has(id)), selectedIds.has(id) ? '✓' : '');
+        const box = createEl('div', '', '');
         box.className = GRID_CHECKBOX_CLASS;
         item.appendChild(box);
-        if (selectedIds.has(id)) {
-          item.style.outline = `3px solid ${GREEN}`;
-          item.style.outlineOffset = '-3px';
-        }
+        applyCheckState(id, item, box);
       }
     }
 
@@ -709,17 +735,24 @@ export default defineContentScript({
     function setGridSelectMode(enabled: boolean): void {
       gridSelectMode = enabled;
       if (!enabled) {
+        // Ocultamos los checkboxes y el resaltado, pero NO tocamos
+        // selectedIds: apagar el modo es solo una cuestión visual. Si
+        // borráramos la selección acá, cualquier apagado-prendido sin
+        // querer (ej. el popup resincronizando su estado) perdía todo lo
+        // que el usuario ya había tildado.
         clearGridCheckboxes();
-        selectedIds.clear();
       } else {
-        paintGridCheckboxes();
+        paintGridCheckboxes(); // repinta ✓ en los items que ya estaban en selectedIds
       }
       updateGridBar();
     }
 
     gridBarClear.addEventListener('click', () => {
+      // Este es el ÚNICO lugar donde la marca se borra del todo, tanto lo
+      // pendiente como lo ya guardado (💾).
       clearGridCheckboxes();
       selectedIds.clear();
+      savedIds.clear();
       updateGridBar();
     });
 
@@ -727,7 +760,7 @@ export default defineContentScript({
     // la API (igual que hace el panel individual) y scrapea sus metadatos
     // desde su propio tileItem, sin necesidad de abrir el video.
     gridBarSave.addEventListener('click', async () => {
-      const ids = Array.from(selectedIds.keys());
+      const ids = Array.from(selectedIds.keys()).filter(id => !savedIds.has(id));
       if (!ids.length) return;
       gridBarSave.setAttribute('disabled', 'true');
       gridBarClear.setAttribute('disabled', 'true');
@@ -784,8 +817,15 @@ export default defineContentScript({
         const summary = `✔ ${inserted} nuevos, ${updated} actualizados${failed ? `, ${failed} fallaron` : ''}`;
         setStatus(gridBarStatus, summary, 'ok');
         showToast(summary, 'ok');
-        clearGridCheckboxes();
-        selectedIds.clear();
+        // No se borra la selección: los que se guardaron bien pasan a
+        // "saved" (💾 azul) para que quede claro cuáles ya se procesaron.
+        // Solo "Limpiar" los saca del todo.
+        for (const link of links) {
+          savedIds.add(link.id);
+          const root = itemRootFor(link.id);
+          const box = root?.querySelector<HTMLElement>(`.${GRID_CHECKBOX_CLASS}`);
+          if (root && box) applyCheckState(link.id, root, box);
+        }
         updateGridBar();
       } else {
         setStatus(gridBarStatus, `✖ ${res.error}`, 'error');
@@ -800,7 +840,38 @@ export default defineContentScript({
     // toggle si el popup se abre apenas cargó la página.
     browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
       if (message.type === 'RG_GET_GRID_SELECT_STATE') {
-        sendResponse({ ok: true, enabled: gridSelectMode, selected_count: selectedIds.size } satisfies RgResponse);
+        const pending = Array.from(selectedIds.keys()).filter(id => !savedIds.has(id)).length;
+        sendResponse({
+          ok: true,
+          enabled: gridSelectMode,
+          selected_count: selectedIds.size,
+          pending_count: pending,
+          saved_count: savedIds.size,
+        } satisfies RgResponse);
+        return true;
+      }
+      if (message.type === 'RG_LIST_GRID_SELECTION') {
+        // Título "en vivo" desde el propio tileItem (mismo scrapeMeta que
+        // usa el resto de la extensión), para que el popup muestre algo
+        // reconocible en vez de solo el id crudo.
+        const selection = Array.from(selectedIds.entries()).map(([id, root]) => ({
+          id,
+          title: scrapeMeta(root).title,
+          saved: savedIds.has(id),
+        }));
+        sendResponse({ ok: true, selection } satisfies RgResponse);
+        return true;
+      }
+      if (message.type === 'RG_DESELECT_GRID_ITEM') {
+        const root = selectedIds.get(message.id);
+        const box = root?.querySelector<HTMLElement>(`.${GRID_CHECKBOX_CLASS}`);
+        if (root && box) toggleSelection(message.id, root, box);
+        else {
+          selectedIds.delete(message.id); // por si el item ya no está en el DOM (scroll lo descargó)
+          savedIds.delete(message.id);
+        }
+        updateGridBar();
+        sendResponse({ ok: true, selected_count: selectedIds.size } satisfies RgResponse);
         return true;
       }
       if (message.type !== 'RG_TOGGLE_GRID_SELECT') return undefined;
