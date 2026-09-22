@@ -64,6 +64,82 @@ export default defineContentScript({
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
     }
 
+    // ---------- Scraping de metadatos (título, autor, tags, vistas, likes) ----------
+    // Estructura vista en el DOM de RedGifs (puede cambiar; si deja de matchear
+    // revisar con el inspector el bloque .userInfo / .description / .sideBar
+    // del item activo):
+    //   div.userInfo > a[href^="/users/"] > span.userName            -> "slimthickn"
+    //   div.description > span.descriptionText
+    //     "Título del video"
+    //     "#tag1 #tag2 #tag3"
+    //   li.sideBarItem > div.ViewButton > div.ViewButton-Label        -> "77K"
+    //   li.sideBarItem > button.LikeButton > span.label               -> "359"
+    interface ScrapedMeta {
+      title: string | null;
+      author: string | null;
+      tags: string[];
+      views: string | null;
+      likes: string | null;
+    }
+
+    function scrapeMeta(activeItem: HTMLElement): ScrapedMeta {
+      let title: string | null = null;
+      let tags: string[] = [];
+
+      const descEl = activeItem.querySelector<HTMLElement>('.description .descriptionText, .descriptionText');
+      if (descEl) {
+        // El título y los hashtags vienen como nodos de texto separados dentro
+        // del mismo span; si en algún momento RedGifs los separa en <span>
+        // hijos esto también los captura porque usamos childNodes completos.
+        const parts = Array.from(descEl.childNodes)
+          .map(n => n.textContent?.trim() ?? '')
+          .filter(Boolean);
+
+        const hashtagLineIdx = parts.findIndex(p => p.startsWith('#'));
+        if (hashtagLineIdx === -1) {
+          // No se detectaron hashtags como línea separada: se intenta extraer
+          // del texto completo igualmente.
+          const fullText = descEl.textContent ?? '';
+          title = (parts[0] ?? fullText).trim() || null;
+          tags = fullText.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+        } else {
+          title = parts.slice(0, hashtagLineIdx).join(' ').trim() || null;
+          const tagsText = parts.slice(hashtagLineIdx).join(' ');
+          tags = tagsText.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+        }
+      }
+
+      // El nombre de usuario se lee del href del link al perfil
+      // (/users/<nombre>), que es más estable que depender del span interno:
+      // el <a> del avatar también contiene un <span> (el wrapper de la
+      // imagen) que aparece antes que el span.userName real en el DOM, así
+      // que un selector genérico "a[href^='/users/'] span" puede devolver
+      // ese span vacío en vez del nombre.
+      const profileHref =
+        activeItem
+          .querySelector<HTMLAnchorElement>(
+            '.userInfo a[href^="/users/"], a[aria-label^="Link to "][href^="/users/"]',
+          )
+          ?.getAttribute('href') ?? null;
+      const hrefMatch = profileHref ? /\/users\/([^/?#]+)/.exec(profileHref) : null;
+      const authorFromHref = hrefMatch ? decodeURIComponent(hrefMatch[1] ?? '') || null : null;
+
+      const authorFromSpan =
+        activeItem.querySelector<HTMLElement>('.userInfo .userName, span.userName')?.textContent?.trim() ||
+        null;
+
+      const author = authorFromHref ?? authorFromSpan;
+
+      const views =
+        activeItem.querySelector<HTMLElement>('.ViewButton-Label, [class*="ViewButton"] [class*="Label"]')
+          ?.textContent?.trim() || null;
+      const likes =
+        activeItem.querySelector<HTMLElement>('.LikeButton .label, [class*="LikeButton"] [class*="label"]')
+          ?.textContent?.trim() || null;
+
+      return { title, author, tags, views, likes };
+    }
+
     // Eliminar panel y estilo anteriores si existen
     document.getElementById(PANEL_ID)?.remove();
     document.getElementById(STYLE_ID)?.remove();
@@ -158,7 +234,7 @@ export default defineContentScript({
       );
     }
 
-    function renderResult(id: string, url: string, imageUrl: string): void {
+    function renderResult(id: string, url: string, imageUrl: string, meta: ScrapedMeta): void {
       const card = createEl(
         'div',
         `background:#2a2a2a; padding:12px; border-radius:8px; border-left:4px solid ${GREEN}; width:100%; animation:zoomIn 0.3s; display:flex; flex-direction:column; gap:10px;`,
@@ -170,10 +246,29 @@ export default defineContentScript({
         createEl(
           'div',
           'font-weight:bold; font-size:12px; color:#ddd; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
-          '🎥 Viendo ahora:',
+          meta.title ? `🎥 ${meta.title}` : '🎥 Viendo ahora:',
         ),
-        createEl('div', 'color:#888; font-size:10px;', id),
+        createEl('div', 'color:#888; font-size:10px;', meta.author ? `${id} · @${meta.author}` : id),
       );
+
+      // Metadatos detectados: tags + vistas/likes, para confirmar visualmente
+      // que el scraping agarró lo correcto antes de guardar.
+      const metaBox = createEl(
+        'div',
+        'display:flex; flex-direction:column; gap:4px; font-size:10px; color:#9fd3ff;',
+      );
+      if (meta.tags.length) {
+        metaBox.append(createEl('div', 'color:#9fd3ff; word-break:break-word;', meta.tags.join(' ')));
+      }
+      if (meta.views || meta.likes) {
+        metaBox.append(
+          createEl(
+            'div',
+            'color:#bbb;',
+            `👁 ${meta.views ?? '—'}   ❤ ${meta.likes ?? '—'}`,
+          ),
+        );
+      }
 
       // --- Zona AZUL: descarga en segundo plano (background.ts) ---
       const dlBox = createEl('div', 'display:flex; flex-direction:column; gap:4px;');
@@ -249,7 +344,24 @@ export default defineContentScript({
       async function saveCurrentLink(): Promise<void> {
         saveButton.disabled = true;
         setStatus(dbStatus, 'Guardando...');
-        const res = await send({ type: 'RG_SAVE_LINK', id, url, imageUrl, pageUrl: location.href });
+        // Se re-scrapea justo antes de guardar por si vistas/likes cambiaron
+        // mientras el usuario miraba el video.
+        const freshItem = document.querySelector<HTMLElement>(ACTIVE_ITEM_SELECTOR);
+        const freshMeta =
+          freshItem && freshItem.getAttribute('data-feed-item-id') === id ? scrapeMeta(freshItem) : meta;
+
+        const res = await send({
+          type: 'RG_SAVE_LINK',
+          id,
+          url,
+          imageUrl,
+          pageUrl: location.href,
+          title: freshMeta.title ?? undefined,
+          author: freshMeta.author ?? undefined,
+          tags: freshMeta.tags,
+          views: freshMeta.views ?? undefined,
+          likes: freshMeta.likes ?? undefined,
+        });
         if (res.ok) {
           setStatus(dbStatus, res.inserted ? '✔ Link guardado' : 'ℹ Este link ya estaba guardado', 'ok');
           if (res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
@@ -273,7 +385,7 @@ export default defineContentScript({
       viewLink.target = '_blank';
       viewLink.rel = 'noopener noreferrer';
 
-      card.append(head, dlBox, dbBox, viewLink);
+      card.append(head, metaBox, dlBox, dbBox, viewLink);
       content.replaceChildren(card);
 
       // Contador inicial y auto-guardado
@@ -299,7 +411,10 @@ export default defineContentScript({
       const links = await getValidLink(id);
 
       // Verificamos que sigamos en el mismo video antes de mostrar el link
-      if (links && currentActiveId === id) renderResult(id, links.videoUrl, links.imageUrl);
+      if (links && currentActiveId === id) {
+        const meta = scrapeMeta(activeItem);
+        renderResult(id, links.videoUrl, links.imageUrl, meta);
+      }
     }
 
     // Agrupa muchos eventos seguidos en una sola ejecución por frame

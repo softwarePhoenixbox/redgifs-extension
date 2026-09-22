@@ -4,7 +4,19 @@ export type ExportFormat = 'sqlite' | 'db' | 'xlsx' | 'html';
 
 export type RgRequest =
   | { type: 'RG_DOWNLOAD'; id: string; url: string }
-  | { type: 'RG_SAVE_LINK'; id: string; url: string; imageUrl?: string; pageUrl: string }
+  | {
+      type: 'RG_SAVE_LINK';
+      id: string;
+      url: string;
+      imageUrl?: string;
+      pageUrl: string;
+      // Metadatos scrapeados de la página en el momento del guardado
+      title?: string;
+      author?: string;
+      tags?: string[];
+      views?: string;
+      likes?: string;
+    }
   | { type: 'RG_STATS' }
   | { type: 'RG_EXPORT_DB'; format: ExportFormat };
 

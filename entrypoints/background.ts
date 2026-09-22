@@ -40,6 +40,12 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
         url: msg.url,
         imageUrl: msg.imageUrl,
         pageUrl: msg.pageUrl,
+        // Metadatos scrapeados en el content script (título, autor, tags, vistas, likes)
+        title: msg.title,
+        author: msg.author,
+        tags: msg.tags,
+        views: msg.views,
+        likes: msg.likes,
       });
       return { ok: true, inserted, total };
     }

@@ -1,4 +1,7 @@
-import initSqlJs, { type Database } from 'sql.js';
+import initSqlJs, {
+  type Database,
+  type SqlValue,
+} from 'sql.js';
 // Vite copia el .wasm como asset de la extensión y nos da su URL.
 import wasmUrl from 'sql.js/dist/sql-wasm-browser.wasm?url';
 
@@ -20,6 +23,17 @@ CREATE TABLE IF NOT EXISTS links (
 );
 CREATE INDEX IF NOT EXISTS idx_links_created_at ON links (created_at);
 `;
+
+// Columnas añadidas después de la primera versión. Se agregan solas si faltan
+// (ver migrate()), sin tocar las bases ya guardadas en IndexedDB.
+const EXTRA_COLUMNS: Array<{ name: string; ddl: string }> = [
+  { name: 'image_url', ddl: 'ALTER TABLE links ADD COLUMN image_url TEXT' },
+  { name: 'title', ddl: 'ALTER TABLE links ADD COLUMN title TEXT' },
+  { name: 'author', ddl: 'ALTER TABLE links ADD COLUMN author TEXT' },
+  { name: 'tags', ddl: 'ALTER TABLE links ADD COLUMN tags TEXT' }, // JSON.stringify(string[])
+  { name: 'views', ddl: 'ALTER TABLE links ADD COLUMN views TEXT' },
+  { name: 'likes', ddl: 'ALTER TABLE links ADD COLUMN likes TEXT' },
+];
 
 // ---------- IndexedDB (solo guarda el archivo .sqlite como bytes) ----------
 function idbOpen(): Promise<IDBDatabase> {
@@ -73,13 +87,21 @@ async function openDb(): Promise<Database> {
   return db;
 }
 
-// Bases guardadas con la versión anterior no tienen la columna image_url
+// Bases guardadas con versiones anteriores no tienen todas las columnas.
 async function migrate(db: Database): Promise<void> {
-  const columns = db.exec('PRAGMA table_info(links)')[0]?.values.map(row => row[1]) ?? [];
-  if (columns.includes('image_url')) return;
-  db.run('ALTER TABLE links ADD COLUMN image_url TEXT');
-  // Rellena las filas viejas con el patrón <Nombre>-mobile.jpg
-  db.run("UPDATE links SET image_url = replace(url, '.mp4', '-mobile.jpg') WHERE url LIKE '%.mp4'");
+  const columns = new Set(
+    (db.exec('PRAGMA table_info(links)')[0]?.values.map(row => String(row[1])) ?? []),
+  );
+  let addedImageUrl = false;
+  for (const { name, ddl } of EXTRA_COLUMNS) {
+    if (columns.has(name)) continue;
+    db.run(ddl);
+    if (name === 'image_url') addedImageUrl = true;
+  }
+  if (addedImageUrl) {
+    // Rellena las filas viejas con el patrón <Nombre>-mobile.jpg
+    db.run("UPDATE links SET image_url = replace(url, '.mp4', '-mobile.jpg') WHERE url LIKE '%.mp4'");
+  }
   await persist(db);
 }
 
@@ -114,27 +136,76 @@ export interface SaveLinkInput {
   url: string;
   imageUrl?: string;
   pageUrl: string;
+  title?: string;
+  author?: string;
+  tags?: string[];
+  views?: string;
+  likes?: string;
 }
 
-export function saveLink({ gifId, url, imageUrl, pageUrl }: SaveLinkInput) {
+export function saveLink({ gifId, url, imageUrl, pageUrl, title, author, tags, views, likes }: SaveLinkInput) {
+  const tagsJson = tags && tags.length ? JSON.stringify(tags) : null;
+
   return enqueue(async db => {
-    const existing = db.exec('SELECT image_url FROM links WHERE gif_id = ?', [gifId]);
+    const existing = db.exec('SELECT image_url, title, author FROM links WHERE gif_id = ?', [gifId]);
     const row = existing[0]?.values[0];
     let inserted = false;
     let changed = false;
 
     if (!row) {
-      db.run('INSERT INTO links (gif_id, url, image_url, page_url) VALUES (?, ?, ?, ?)', [
-        gifId,
-        url,
-        imageUrl ?? null,
-        pageUrl,
-      ]);
+      db.run(
+        `INSERT INTO links (gif_id, url, image_url, page_url, title, author, tags, views, likes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          gifId,
+          url,
+          imageUrl ?? null,
+          pageUrl,
+          title ?? null,
+          author ?? null,
+          tagsJson,
+          views ?? null,
+          likes ?? null,
+        ],
+      );
       inserted = changed = true;
-    } else if (imageUrl && !row[0]) {
-      // Link ya guardado sin imagen: se completa
-      db.run('UPDATE links SET image_url = ? WHERE gif_id = ?', [imageUrl, gifId]);
-      changed = true;
+    } else {
+      const [curImage, curTitle, curAuthor] = row;
+      const updates: string[] = [];
+      const params: SqlValue[] = [];
+
+      // Imagen, título y autor casi no cambian: se completan solo si faltaban.
+      if (imageUrl && !curImage) {
+        updates.push('image_url = ?');
+        params.push(imageUrl);
+      }
+      if (title && !curTitle) {
+        updates.push('title = ?');
+        params.push(title);
+      }
+      if (author && !curAuthor) {
+        updates.push('author = ?');
+        params.push(author);
+      }
+      // Tags, vistas y likes se refrescan siempre que se vuelvan a scrapear,
+      // porque las vistas/likes cambian con el tiempo.
+      if (tagsJson) {
+        updates.push('tags = ?');
+        params.push(tagsJson);
+      }
+      if (views) {
+        updates.push('views = ?');
+        params.push(views);
+      }
+      if (likes) {
+        updates.push('likes = ?');
+        params.push(likes);
+      }
+
+      if (updates.length) {
+        db.run(`UPDATE links SET ${updates.join(', ')} WHERE gif_id = ?`, [...params, gifId]);
+        changed = true;
+      }
     }
 
     if (changed) await persist(db);
@@ -167,12 +238,28 @@ export interface LinkRow {
   imageUrl: string | null;
   pageUrl: string | null;
   createdAt: string;
+  title: string | null;
+  author: string | null;
+  tags: string[];
+  views: string | null;
+  likes: string | null;
+}
+
+function parseTags(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function listLinks(): Promise<LinkRow[]> {
   return enqueue(db => {
     const res = db.exec(
-      'SELECT id, gif_id, url, image_url, page_url, created_at FROM links ORDER BY id',
+      `SELECT id, gif_id, url, image_url, page_url, created_at, title, author, tags, views, likes
+       FROM links ORDER BY id`,
     );
     return (res[0]?.values ?? []).map(r => ({
       id: Number(r[0]),
@@ -181,6 +268,11 @@ export function listLinks(): Promise<LinkRow[]> {
       imageUrl: r[3] === null ? null : String(r[3]),
       pageUrl: r[4] === null ? null : String(r[4]),
       createdAt: String(r[5]),
+      title: r[6] === null ? null : String(r[6]),
+      author: r[7] === null ? null : String(r[7]),
+      tags: parseTags(r[8]),
+      views: r[9] === null ? null : String(r[9]),
+      likes: r[10] === null ? null : String(r[10]),
     }));
   });
 }
