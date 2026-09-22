@@ -44,7 +44,12 @@ export type RgRequest =
   | { type: 'RG_DOWNLOAD_ALL' }
   // Popup -> content script: activa/desactiva el modo selección múltiple
   // en la grilla de thumbnails (perfiles, tags). No pasa por el background.
-  | { type: 'RG_TOGGLE_GRID_SELECT'; enabled?: boolean };
+  | { type: 'RG_TOGGLE_GRID_SELECT'; enabled?: boolean }
+  // Popup -> content script: solo consulta el estado actual (modo activo y
+  // cuántos hay seleccionados), sin cambiar nada. Se usa al abrir el popup,
+  // porque su estado de React se reinicia cada vez que se cierra y el
+  // content script es la única fuente de verdad real.
+  | { type: 'RG_GET_GRID_SELECT_STATE' };
 
 export type RgResponse =
   | {
@@ -63,6 +68,7 @@ export type RgResponse =
       failed?: number; // RG_DOWNLOAD_ALL (links inválidos o que fallaron)
       inserted_count?: number; // RG_SAVE_BULK (links nuevos)
       updated_count?: number; // RG_SAVE_BULK (links que ya existían y se actualizaron)
-      enabled?: boolean; // RG_TOGGLE_GRID_SELECT (estado resultante del modo selección)
+      enabled?: boolean; // RG_TOGGLE_GRID_SELECT / RG_GET_GRID_SELECT_STATE (estado del modo selección)
+      selected_count?: number; // RG_GET_GRID_SELECT_STATE (cuántos hay tildados ahora mismo)
     }
   | { ok: false; error: string };

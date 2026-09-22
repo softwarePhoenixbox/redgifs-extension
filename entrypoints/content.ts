@@ -656,6 +656,13 @@ export default defineContentScript({
     // Dibuja los checkboxes sobre los tileItem actuales. Se puede volver a
     // llamar (ej. tras cargar más resultados por scroll infinito) sin
     // duplicar: si un item ya tiene su checkbox, se lo salta.
+    //
+    // El toggle en sí lo maneja SOLO onCaptureClickInGrid (delegado en
+    // document, más abajo) — el checkbox no tiene su propio listener de
+    // click. Tenerlos a los dos disparaba toggleSelection() dos veces por
+    // click (uno por el listener del box, otro por el de document, ambos en
+    // fase capture), lo que invertía la selección de vuelta o duplicaba el
+    // guardado si justo caía en un número par/impar distinto al esperado.
     function paintGridCheckboxes(): void {
       if (!gridSelectMode) return;
       for (const item of findGridItems()) {
@@ -667,15 +674,6 @@ export default defineContentScript({
 
         const box = createEl('div', checkboxCss(selectedIds.has(id)), selectedIds.has(id) ? '✓' : '');
         box.className = GRID_CHECKBOX_CLASS;
-        box.addEventListener(
-          'click',
-          e => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleSelection(id, item, box);
-          },
-          true,
-        );
         item.appendChild(box);
         if (selectedIds.has(id)) {
           item.style.outline = `3px solid ${GREEN}`;
@@ -684,13 +682,12 @@ export default defineContentScript({
       }
     }
 
-    // Mientras el modo selección está activo, un click en cualquier parte
-    // del tileItem (fuera del checkbox) también selecciona en vez de abrir
-    // el video: se intercepta el <a class="clickArea"> con capture.
+    // Único punto que decide toggles: intercepta CUALQUIER click dentro de
+    // un tileItem (sea sobre el checkbox o sobre el resto de la miniatura)
+    // y selecciona en vez de dejar que el <a class="clickArea"> navegue.
     function onCaptureClickInGrid(e: MouseEvent): void {
       if (!gridSelectMode) return;
       const target = e.target as HTMLElement;
-      if (target.classList.contains(GRID_CHECKBOX_CLASS)) return; // ya lo maneja su propio listener
       const item = target.closest<HTMLElement>('[data-feed-item-id]');
       if (!item) return;
       const id = item.getAttribute('data-feed-item-id');
@@ -802,10 +799,14 @@ export default defineContentScript({
     // el modo selección. Se registra temprano para no perder el primer
     // toggle si el popup se abre apenas cargó la página.
     browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
+      if (message.type === 'RG_GET_GRID_SELECT_STATE') {
+        sendResponse({ ok: true, enabled: gridSelectMode, selected_count: selectedIds.size } satisfies RgResponse);
+        return true;
+      }
       if (message.type !== 'RG_TOGGLE_GRID_SELECT') return undefined;
       const next = message.enabled ?? !gridSelectMode;
       setGridSelectMode(next);
-      sendResponse({ ok: true, enabled: next } satisfies RgResponse);
+      sendResponse({ ok: true, enabled: next, selected_count: selectedIds.size } satisfies RgResponse);
       return true;
     });
 

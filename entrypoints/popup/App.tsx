@@ -60,12 +60,30 @@ export default function App() {
   const [status, setStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [gridSelectMode, setGridSelectMode] = useState(false);
+  const [selectedCount, setSelectedCount] = useState(0);
+
+  // El estado de este popup se reinicia cada vez que se cierra y se vuelve
+  // a abrir, pero el modo selección vive en el content script de la
+  // pestaña. Sin esto, el botón podía mostrar "desactivado" cuando en
+  // realidad ya estaba activo, y un click de más volvía a togglear:
+  // eso era lo que se veía como "duplicado" al guardar.
+  async function syncGridSelectState() {
+    const res = await sendToActiveTab({ type: 'RG_GET_GRID_SELECT_STATE' });
+    if (res.ok) {
+      setGridSelectMode(res.enabled ?? false);
+      setSelectedCount(res.selected_count ?? 0);
+    }
+    // Si falla (pestaña sin redgifs.com abierta, por ejemplo), dejamos el
+    // botón en su estado por defecto sin mostrar error: no es una acción
+    // que el usuario haya pedido, es solo la sincronización inicial.
+  }
 
   async function handleToggleGridSelect() {
     const next = !gridSelectMode;
     const res = await sendToActiveTab({ type: 'RG_TOGGLE_GRID_SELECT', enabled: next });
     if (res.ok) {
       setGridSelectMode(res.enabled ?? next);
+      setSelectedCount(res.selected_count ?? 0);
       setStatus({
         text: (res.enabled ?? next)
           ? '🔲 Selección activada: tocá los gifs en la página y guardalos desde ahí'
@@ -87,6 +105,7 @@ export default function App() {
 
   useEffect(() => {
     void loadLinks();
+    void syncGridSelectState();
   }, []);
 
   const filtered = useMemo(() => {
@@ -175,7 +194,9 @@ export default function App() {
             fontSize: 11,
           }}
         >
-          {gridSelectMode ? '🔲 Selección ACTIVA — tocá para desactivar' : '🔲 Seleccionar en la página (tags/usuarios)'}
+          {gridSelectMode
+            ? `🔲 Selección ACTIVA (${selectedCount}) — tocá para desactivar`
+            : '🔲 Seleccionar en la página (tags/usuarios)'}
         </button>
         <input
           value={query}
