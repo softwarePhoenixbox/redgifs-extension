@@ -88,6 +88,32 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       });
       return { ok: true, inserted, total };
     }
+    case 'RG_SAVE_BULK': {
+      // Guarda varios links de una (selección múltiple en una grilla de
+      // tags/usuario). Reutiliza saveLink() uno por uno -> la cola interna
+      // de links-db.ts ya serializa los writes, así que esto es seguro
+      // aunque se dispare junto con otros guardados.
+      let insertedCount = 0;
+      let updatedCount = 0;
+      for (const link of msg.links) {
+        if (!ID_RE.test(link.id) || !isRedgifsUrl(link.url)) continue;
+        if (link.imageUrl && !isRedgifsUrl(link.imageUrl)) continue;
+        const { inserted } = await saveLink({
+          gifId: link.id,
+          url: link.url,
+          imageUrl: link.imageUrl,
+          pageUrl: link.pageUrl,
+          title: link.title,
+          author: link.author,
+          tags: link.tags,
+          views: link.views,
+          likes: link.likes,
+        });
+        if (inserted) insertedCount++;
+        else updatedCount++;
+      }
+      return { ok: true, inserted_count: insertedCount, updated_count: updatedCount, total: await getTotal() };
+    }
     case 'RG_STATS':
       return { ok: true, total: await getTotal() };
     case 'RG_CHECK_LINK':

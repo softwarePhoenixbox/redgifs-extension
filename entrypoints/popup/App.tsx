@@ -11,6 +11,21 @@ async function send(request: RgRequest): Promise<RgResponse> {
   }
 }
 
+// A diferencia de send(), esto habla directo con el content script de la
+// pestaña activa (no con el background). Se usa para el modo selección
+// múltiple en grillas: solo tiene sentido en la pestaña que el usuario está
+// mirando ahora mismo.
+async function sendToActiveTab(request: RgRequest): Promise<RgResponse> {
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { ok: false, error: 'No se encontró la pestaña activa' };
+    const res = (await browser.tabs.sendMessage(tab.id, request)) as RgResponse | undefined;
+    return res ?? { ok: false, error: 'Sin respuesta de la página' };
+  } catch {
+    return { ok: false, error: 'Abrí una página de redgifs.com para usar esto' };
+  }
+}
+
 function saveBase64AsFile(base64: string, filename: string, mime: string): void {
   const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
   const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
@@ -44,6 +59,23 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [gridSelectMode, setGridSelectMode] = useState(false);
+
+  async function handleToggleGridSelect() {
+    const next = !gridSelectMode;
+    const res = await sendToActiveTab({ type: 'RG_TOGGLE_GRID_SELECT', enabled: next });
+    if (res.ok) {
+      setGridSelectMode(res.enabled ?? next);
+      setStatus({
+        text: (res.enabled ?? next)
+          ? '🔲 Selección activada: tocá los gifs en la página y guardalos desde ahí'
+          : 'Selección desactivada',
+        kind: 'ok',
+      });
+    } else {
+      setStatus({ text: `✖ ${res.error}`, kind: 'error' });
+    }
+  }
 
   async function loadLinks() {
     setBusy(true);
@@ -127,6 +159,24 @@ export default function App() {
           <strong style={{ color: '#00ff00', fontSize: 14 }}>🎯 Links guardados</strong>
           <span style={{ marginLeft: 'auto', color: '#888' }}>{links.length} total</span>
         </div>
+        <button
+          onClick={() => void handleToggleGridSelect()}
+          style={{
+            width: '100%',
+            marginBottom: 8,
+            background: gridSelectMode ? '#00ff00' : '#3a3a3a',
+            color: gridSelectMode ? '#000' : '#ddd',
+            border: '1px solid ' + (gridSelectMode ? '#00ff00' : '#555'),
+            borderRadius: 6,
+            padding: '7px 0',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 11,
+          }}
+        >
+          {gridSelectMode ? '🔲 Selección ACTIVA — tocá para desactivar' : '🔲 Seleccionar en la página (tags/usuarios)'}
+        </button>
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}

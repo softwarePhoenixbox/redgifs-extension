@@ -590,6 +590,225 @@ export default defineContentScript({
       }
     }
 
+    // ---------- Selección múltiple en grillas (perfiles / tags) ----------
+    // Se activa desde el popup (RG_TOGGLE_GRID_SELECT). Dibuja un checkbox
+    // sobre cada tileItem visible en el DOM (no hace falta que esté en
+    // pantalla: se buscan todos los [data-feed-item-id] del documento), y un
+    // botón flotante aparte para guardar todo lo tildado. Es independiente
+    // del panel "Video en Pantalla": ese sigue funcionando igual.
+    const GRID_CHECKBOX_CLASS = 'rg-grid-checkbox';
+    const GRID_BAR_ID = 'rg-grid-bar';
+    let gridSelectMode = false;
+    const selectedIds = new Map<string, HTMLElement>(); // id -> tileItem root
+
+    function findGridItems(): HTMLElement[] {
+      return Array.from(document.querySelectorAll<HTMLElement>('[data-feed-item-id]'));
+    }
+
+    function itemRootFor(id: string): HTMLElement | undefined {
+      return selectedIds.get(id);
+    }
+
+    const gridBar = createEl(
+      'div',
+      'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:10002; background:rgba(18,18,18,0.98); color:white; padding:10px 14px; border-radius:10px; font-family:sans-serif; border:1px solid #00ff00; box-shadow:0 10px 30px rgba(0,0,0,0.8); display:none; align-items:center; gap:10px; font-size:12px;',
+    );
+    gridBar.id = GRID_BAR_ID;
+    const gridBarCount = createEl('span', 'color:#9fd3ff; white-space:nowrap;', '0 seleccionados');
+    const gridBarSave = createEl('button', buttonCss(RED, 'white') + 'width:auto; padding:8px 14px;', '💾 Guardar seleccionados');
+    const gridBarClear = createEl(
+      'button',
+      'background:#3a3a3a; color:#ddd; border:1px solid #555; cursor:pointer; padding:8px 12px; border-radius:6px; font-size:12px; font-family:inherit;',
+      'Limpiar',
+    );
+    const gridBarStatus = createEl('span', 'color:#aaa; font-size:10px; white-space:nowrap;', '');
+    gridBar.append(gridBarCount, gridBarSave, gridBarClear, gridBarStatus);
+    document.body.appendChild(gridBar);
+
+    function updateGridBar(): void {
+      gridBarCount.textContent = `${selectedIds.size} seleccionados`;
+      gridBar.style.display = gridSelectMode ? 'flex' : 'none';
+      gridBarSave.toggleAttribute('disabled', selectedIds.size === 0);
+    }
+
+    function checkboxCss(checked: boolean): string {
+      return `position:absolute; top:6px; left:6px; z-index:5; width:22px; height:22px; border-radius:6px; border:2px solid ${
+        checked ? GREEN : '#fff'
+      }; background:${checked ? GREEN : 'rgba(0,0,0,0.55)'}; box-shadow:0 1px 4px rgba(0,0,0,0.6); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:#000;`;
+    }
+
+    function toggleSelection(id: string, root: HTMLElement, box: HTMLElement): void {
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+        box.style.cssText = checkboxCss(false);
+        box.textContent = '';
+        root.style.outline = '';
+      } else {
+        selectedIds.set(id, root);
+        box.style.cssText = checkboxCss(true);
+        box.textContent = '✓';
+        root.style.outline = `3px solid ${GREEN}`;
+        root.style.outlineOffset = '-3px';
+      }
+      updateGridBar();
+    }
+
+    // Dibuja los checkboxes sobre los tileItem actuales. Se puede volver a
+    // llamar (ej. tras cargar más resultados por scroll infinito) sin
+    // duplicar: si un item ya tiene su checkbox, se lo salta.
+    function paintGridCheckboxes(): void {
+      if (!gridSelectMode) return;
+      for (const item of findGridItems()) {
+        const id = item.getAttribute('data-feed-item-id');
+        if (!id || item.querySelector(`.${GRID_CHECKBOX_CLASS}`)) continue;
+
+        const computed = getComputedStyle(item);
+        if (computed.position === 'static') item.style.position = 'relative';
+
+        const box = createEl('div', checkboxCss(selectedIds.has(id)), selectedIds.has(id) ? '✓' : '');
+        box.className = GRID_CHECKBOX_CLASS;
+        box.addEventListener(
+          'click',
+          e => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleSelection(id, item, box);
+          },
+          true,
+        );
+        item.appendChild(box);
+        if (selectedIds.has(id)) {
+          item.style.outline = `3px solid ${GREEN}`;
+          item.style.outlineOffset = '-3px';
+        }
+      }
+    }
+
+    // Mientras el modo selección está activo, un click en cualquier parte
+    // del tileItem (fuera del checkbox) también selecciona en vez de abrir
+    // el video: se intercepta el <a class="clickArea"> con capture.
+    function onCaptureClickInGrid(e: MouseEvent): void {
+      if (!gridSelectMode) return;
+      const target = e.target as HTMLElement;
+      if (target.classList.contains(GRID_CHECKBOX_CLASS)) return; // ya lo maneja su propio listener
+      const item = target.closest<HTMLElement>('[data-feed-item-id]');
+      if (!item) return;
+      const id = item.getAttribute('data-feed-item-id');
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const box = item.querySelector<HTMLElement>(`.${GRID_CHECKBOX_CLASS}`);
+      if (box) toggleSelection(id, item, box);
+    }
+    document.addEventListener('click', onCaptureClickInGrid, true);
+
+    function clearGridCheckboxes(): void {
+      document.querySelectorAll(`.${GRID_CHECKBOX_CLASS}`).forEach(el => el.remove());
+      for (const root of selectedIds.values()) {
+        root.style.outline = '';
+      }
+    }
+
+    function setGridSelectMode(enabled: boolean): void {
+      gridSelectMode = enabled;
+      if (!enabled) {
+        clearGridCheckboxes();
+        selectedIds.clear();
+      } else {
+        paintGridCheckboxes();
+      }
+      updateGridBar();
+    }
+
+    gridBarClear.addEventListener('click', () => {
+      clearGridCheckboxes();
+      selectedIds.clear();
+      updateGridBar();
+    });
+
+    // Guarda todo lo seleccionado: para cada id, resuelve el video real vía
+    // la API (igual que hace el panel individual) y scrapea sus metadatos
+    // desde su propio tileItem, sin necesidad de abrir el video.
+    gridBarSave.addEventListener('click', async () => {
+      const ids = Array.from(selectedIds.keys());
+      if (!ids.length) return;
+      gridBarSave.setAttribute('disabled', 'true');
+      gridBarClear.setAttribute('disabled', 'true');
+
+      const links: Array<{
+        id: string;
+        url: string;
+        imageUrl?: string;
+        pageUrl: string;
+        title?: string;
+        author?: string;
+        tags?: string[];
+        views?: string;
+        likes?: string;
+      }> = [];
+      let failed = 0;
+
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i]!;
+        setStatus(gridBarStatus, `Resolviendo ${i + 1}/${ids.length}...`);
+        const result = await getValidLink(id);
+        if (result.kind !== 'ok') {
+          failed++;
+          continue;
+        }
+        const root = itemRootFor(id);
+        const meta = root ? scrapeMeta(root) : { title: null, author: null, tags: [], views: null, likes: null };
+        links.push({
+          id,
+          url: result.videoUrl,
+          imageUrl: result.imageUrl,
+          pageUrl: location.href,
+          title: meta.title ?? undefined,
+          author: meta.author ?? undefined,
+          tags: meta.tags,
+          views: meta.views ?? undefined,
+          likes: meta.likes ?? undefined,
+        });
+      }
+
+      if (!links.length) {
+        setStatus(gridBarStatus, '✖ No se pudo resolver ninguno', 'error');
+        showToast('✖ No se pudo guardar ninguno', 'error');
+        gridBarSave.removeAttribute('disabled');
+        gridBarClear.removeAttribute('disabled');
+        return;
+      }
+
+      setStatus(gridBarStatus, 'Guardando en la base...');
+      const res = await send({ type: 'RG_SAVE_BULK', links });
+      if (res.ok) {
+        const inserted = res.inserted_count ?? 0;
+        const updated = res.updated_count ?? 0;
+        const summary = `✔ ${inserted} nuevos, ${updated} actualizados${failed ? `, ${failed} fallaron` : ''}`;
+        setStatus(gridBarStatus, summary, 'ok');
+        showToast(summary, 'ok');
+        clearGridCheckboxes();
+        selectedIds.clear();
+        updateGridBar();
+      } else {
+        setStatus(gridBarStatus, `✖ ${res.error}`, 'error');
+        showToast(`✖ ${res.error}`, 'error');
+      }
+      gridBarSave.removeAttribute('disabled');
+      gridBarClear.removeAttribute('disabled');
+    });
+
+    // Mensajes que vienen del popup (no del background): activar/desactivar
+    // el modo selección. Se registra temprano para no perder el primer
+    // toggle si el popup se abre apenas cargó la página.
+    browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
+      if (message.type !== 'RG_TOGGLE_GRID_SELECT') return undefined;
+      const next = message.enabled ?? !gridSelectMode;
+      setGridSelectMode(next);
+      sendResponse({ ok: true, enabled: next } satisfies RgResponse);
+      return true;
+    });
+
     // ---------- Lógica principal ----------
     // Estrategias de detección, en orden:
     //  1) Página de video individual /watch/<id>: el id sale de la URL, no
@@ -672,6 +891,7 @@ export default defineContentScript({
       requestAnimationFrame(() => {
         scheduled = false;
         void updatePanel();
+        if (gridSelectMode) paintGridCheckboxes(); // cubre items nuevos del scroll infinito
       });
     }
 
@@ -727,7 +947,10 @@ export default defineContentScript({
     // Limpieza si la extensión se recarga o se desinstala
     ctx.onInvalidated(() => {
       observer.disconnect();
+      document.removeEventListener('click', onCaptureClickInGrid, true);
+      clearGridCheckboxes();
       panel.remove();
+      gridBar.remove();
       style.remove();
     });
   },
