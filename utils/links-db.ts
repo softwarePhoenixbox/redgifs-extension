@@ -76,10 +76,20 @@ async function idbSet(key: string, value: Uint8Array): Promise<void> {
 // ---------- SQLite ----------
 let dbPromise: Promise<Database> | null = null;
 let queue: Promise<unknown> = Promise.resolve();
+let sqlPromise: ReturnType<typeof initSqlJs> | null = null;
+
+// Se carga una sola vez y se reutiliza tanto para la base principal como
+// para leer archivos .db/.sqlite importados desde otro navegador.
+function getSql() {
+  sqlPromise ??= (async () => {
+    const wasmBinary = await (await fetch(wasmUrl)).arrayBuffer();
+    return initSqlJs({ wasmBinary });
+  })();
+  return sqlPromise;
+}
 
 async function openDb(): Promise<Database> {
-  const wasmBinary = await (await fetch(wasmUrl)).arrayBuffer();
-  const SQL = await initSqlJs({ wasmBinary });
+  const SQL = await getSql();
   const saved = await idbGet(IDB_KEY);
   const db = saved ? new SQL.Database(saved) : new SQL.Database();
   db.run(SCHEMA);
@@ -143,73 +153,131 @@ export interface SaveLinkInput {
   likes?: string;
 }
 
-export function saveLink({ gifId, url, imageUrl, pageUrl, title, author, tags, views, likes }: SaveLinkInput) {
+// Inserta o actualiza una fila por gif_id (UNIQUE), sin persistir ni
+// encolar: eso lo hacen saveLink() e importDb() alrededor de esta función.
+// Como gif_id es UNIQUE, nunca se duplica: si ya existe se actualiza
+// (tags/vistas/likes siempre se refrescan; imagen/título/autor solo si
+// faltaban), y si no existe se inserta.
+function upsertRow(
+  db: Database,
+  { gifId, url, imageUrl, pageUrl, title, author, tags, views, likes }: SaveLinkInput,
+): { inserted: boolean; changed: boolean } {
   const tagsJson = tags && tags.length ? JSON.stringify(tags) : null;
+  const existing = db.exec('SELECT image_url, title, author FROM links WHERE gif_id = ?', [gifId]);
+  const row = existing[0]?.values[0];
 
+  if (!row) {
+    db.run(
+      `INSERT INTO links (gif_id, url, image_url, page_url, title, author, tags, views, likes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        gifId,
+        url,
+        imageUrl ?? null,
+        pageUrl,
+        title ?? null,
+        author ?? null,
+        tagsJson,
+        views ?? null,
+        likes ?? null,
+      ],
+    );
+    return { inserted: true, changed: true };
+  }
+
+  const [curImage, curTitle, curAuthor] = row;
+  const updates: string[] = [];
+  const params: SqlValue[] = [];
+
+  // Imagen, título y autor casi no cambian: se completan solo si faltaban.
+  if (imageUrl && !curImage) {
+    updates.push('image_url = ?');
+    params.push(imageUrl);
+  }
+  if (title && !curTitle) {
+    updates.push('title = ?');
+    params.push(title);
+  }
+  if (author && !curAuthor) {
+    updates.push('author = ?');
+    params.push(author);
+  }
+  // Tags, vistas y likes se refrescan siempre que se vuelvan a scrapear,
+  // porque las vistas/likes cambian con el tiempo.
+  if (tagsJson) {
+    updates.push('tags = ?');
+    params.push(tagsJson);
+  }
+  if (views) {
+    updates.push('views = ?');
+    params.push(views);
+  }
+  if (likes) {
+    updates.push('likes = ?');
+    params.push(likes);
+  }
+
+  if (updates.length) {
+    db.run(`UPDATE links SET ${updates.join(', ')} WHERE gif_id = ?`, [...params, gifId]);
+    return { inserted: false, changed: true };
+  }
+  return { inserted: false, changed: false };
+}
+
+export function saveLink(input: SaveLinkInput) {
   return enqueue(async db => {
-    const existing = db.exec('SELECT image_url, title, author FROM links WHERE gif_id = ?', [gifId]);
-    const row = existing[0]?.values[0];
-    let inserted = false;
-    let changed = false;
-
-    if (!row) {
-      db.run(
-        `INSERT INTO links (gif_id, url, image_url, page_url, title, author, tags, views, likes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          gifId,
-          url,
-          imageUrl ?? null,
-          pageUrl,
-          title ?? null,
-          author ?? null,
-          tagsJson,
-          views ?? null,
-          likes ?? null,
-        ],
-      );
-      inserted = changed = true;
-    } else {
-      const [curImage, curTitle, curAuthor] = row;
-      const updates: string[] = [];
-      const params: SqlValue[] = [];
-
-      // Imagen, título y autor casi no cambian: se completan solo si faltaban.
-      if (imageUrl && !curImage) {
-        updates.push('image_url = ?');
-        params.push(imageUrl);
-      }
-      if (title && !curTitle) {
-        updates.push('title = ?');
-        params.push(title);
-      }
-      if (author && !curAuthor) {
-        updates.push('author = ?');
-        params.push(author);
-      }
-      // Tags, vistas y likes se refrescan siempre que se vuelvan a scrapear,
-      // porque las vistas/likes cambian con el tiempo.
-      if (tagsJson) {
-        updates.push('tags = ?');
-        params.push(tagsJson);
-      }
-      if (views) {
-        updates.push('views = ?');
-        params.push(views);
-      }
-      if (likes) {
-        updates.push('likes = ?');
-        params.push(likes);
-      }
-
-      if (updates.length) {
-        db.run(`UPDATE links SET ${updates.join(', ')} WHERE gif_id = ?`, [...params, gifId]);
-        changed = true;
-      }
-    }
-
+    const { inserted, changed } = upsertRow(db, input);
     if (changed) await persist(db);
     return { inserted, total: countRows(db) };
+  });
+}
+
+// Fusiona un archivo .sqlite/.db exportado (de otro navegador/perfil) con la
+// base local. gif_id es UNIQUE, así que nunca se duplica: fila existente se
+// actualiza, fila nueva se inserta. Si el navegador no tenía base propia,
+// esto la crea a partir del archivo importado.
+export function importDb(bytes: Uint8Array): Promise<{ imported: number; updated: number; total: number }> {
+  return enqueue(async db => {
+    const SQL = await getSql();
+    let importedDb: Database;
+    try {
+      importedDb = new SQL.Database(bytes);
+    } catch {
+      throw new Error('El archivo no es una base .sqlite/.db válida');
+    }
+
+    let rows: SqlValue[][];
+    try {
+      rows =
+        importedDb.exec(
+          'SELECT gif_id, url, image_url, page_url, title, author, tags, views, likes FROM links',
+        )[0]?.values ?? [];
+    } catch {
+      importedDb.close();
+      throw new Error('El archivo no tiene una tabla "links" reconocible');
+    }
+    importedDb.close();
+
+    let imported = 0;
+    let updated = 0;
+    for (const r of rows) {
+      const { inserted, changed } = upsertRow(db, {
+        gifId: String(r[0]),
+        url: String(r[1]),
+        imageUrl: r[2] === null ? undefined : String(r[2]),
+        pageUrl: r[3] === null ? '' : String(r[3]),
+        title: r[4] === null ? undefined : String(r[4]),
+        author: r[5] === null ? undefined : String(r[5]),
+        tags: parseTags(r[6]),
+        views: r[7] === null ? undefined : String(r[7]),
+        likes: r[8] === null ? undefined : String(r[8]),
+      });
+      if (inserted) imported++;
+      else if (changed) updated++;
+    }
+
+    if (imported || updated) await persist(db);
+    return { imported, updated, total: countRows(db) };
   });
 }
 

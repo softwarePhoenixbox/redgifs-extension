@@ -223,6 +223,15 @@ export default defineContentScript({
       }
     }
 
+    function fileToBase64(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    }
+
     // ---------- Render ----------
     function renderLoading(id: string): void {
       content.replaceChildren(
@@ -339,7 +348,41 @@ export default defineContentScript({
         exportButtons.push(btn);
         exportRow.append(btn);
       }
-      dbBox.append(saveButton, dbStatus, dbRow, exportRow);
+      // Importar un .sqlite/.db exportado desde otro navegador: se fusiona
+      // con la base local por gif_id (UNIQUE), así que nunca se duplica.
+      const importInput = createEl('input', 'display:none;');
+      importInput.type = 'file';
+      importInput.accept = '.sqlite,.db';
+
+      const importBtn = createEl(
+        'button',
+        'width:100%; background:#3a3a3a; color:#9fd3ff; border:1px solid #555; border-radius:4px; cursor:pointer; font-size:10px; padding:6px 0; font-family:inherit;',
+        '📥 Importar DB (fusionar, sin duplicar)',
+      );
+      importBtn.addEventListener('click', () => importInput.click());
+
+      importInput.addEventListener('change', async () => {
+        const file = importInput.files?.[0];
+        if (!file) return;
+        importBtn.disabled = true;
+        setStatus(dbStatus, 'Importando y fusionando...');
+        try {
+          const base64 = await fileToBase64(file);
+          const res = await send({ type: 'RG_IMPORT_DB', base64 });
+          if (res.ok) {
+            setStatus(dbStatus, `✔ ${res.imported ?? 0} nuevos, ${res.updated ?? 0} actualizados`, 'ok');
+            if (res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
+          } else {
+            setStatus(dbStatus, `✖ ${res.error}`, 'error');
+          }
+        } catch {
+          setStatus(dbStatus, '✖ No se pudo leer el archivo', 'error');
+        }
+        importInput.value = '';
+        importBtn.disabled = false;
+      });
+
+      dbBox.append(saveButton, dbStatus, dbRow, exportRow, importBtn, importInput);
 
       async function saveCurrentLink(): Promise<void> {
         saveButton.disabled = true;

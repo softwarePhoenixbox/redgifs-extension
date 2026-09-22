@@ -18,16 +18,19 @@ export type RgRequest =
       likes?: string;
     }
   | { type: 'RG_STATS' }
-  | { type: 'RG_EXPORT_DB'; format: ExportFormat };
+  | { type: 'RG_EXPORT_DB'; format: ExportFormat }
+  | { type: 'RG_IMPORT_DB'; base64: string };
 
 export type RgResponse =
   | {
       ok: true;
       downloadId?: number; // RG_DOWNLOAD
       inserted?: boolean; // RG_SAVE_LINK (false = el link ya estaba guardado)
-      total?: number; // RG_SAVE_LINK y RG_STATS
+      total?: number; // RG_SAVE_LINK, RG_STATS y RG_IMPORT_DB
       base64?: string; // RG_EXPORT_DB
       filename?: string; // RG_EXPORT_DB
       mime?: string; // RG_EXPORT_DB
+      imported?: number; // RG_IMPORT_DB (links nuevos)
+      updated?: number; // RG_IMPORT_DB (links existentes actualizados)
     }
   | { ok: false; error: string };

@@ -1,8 +1,12 @@
 import { buildHtml, buildXlsx } from '../utils/exporters';
-import { bytesToBase64, exportDbBase64, getTotal, listLinks, saveLink } from '../utils/links-db';
+import { bytesToBase64, exportDbBase64, getTotal, importDb, listLinks, saveLink } from '../utils/links-db';
 import type { RgRequest, RgResponse } from '../utils/messages';
 
 const ID_RE = /^[\w-]+$/;
+
+function base64ToBytes(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+}
 
 // Solo aceptamos links https de redgifs.com
 function isRedgifsUrl(value: string): boolean {
@@ -51,6 +55,10 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     }
     case 'RG_STATS':
       return { ok: true, total: await getTotal() };
+    case 'RG_IMPORT_DB': {
+      const { imported, updated, total } = await importDb(base64ToBytes(msg.base64));
+      return { ok: true, imported, updated, total };
+    }
     case 'RG_EXPORT_DB':
       switch (msg.format) {
         case 'sqlite':
