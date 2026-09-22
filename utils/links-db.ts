@@ -285,6 +285,16 @@ export function getTotal(): Promise<number> {
   return enqueue(db => countRows(db));
 }
 
+// Borra un link por gif_id (usado desde el popup). Devuelve el total
+// restante para refrescar el contador sin otra consulta.
+export function deleteLink(gifId: string): Promise<number> {
+  return enqueue(async db => {
+    db.run('DELETE FROM links WHERE gif_id = ?', [gifId]);
+    await persist(db);
+    return countRows(db);
+  });
+}
+
 // Chequea si un gif_id ya está guardado, para mostrar el aviso apenas se
 // detecta el video (sin esperar a que el usuario apriete "Guardar").
 export function linkExists(gifId: string): Promise<boolean> {

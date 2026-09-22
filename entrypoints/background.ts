@@ -1,11 +1,46 @@
 import { buildHtml, buildXlsx } from '../utils/exporters';
-import { bytesToBase64, exportDbBase64, getTotal, importDb, linkExists, listLinks, saveLink } from '../utils/links-db';
+import {
+  bytesToBase64,
+  deleteLink,
+  exportDbBase64,
+  getTotal,
+  importDb,
+  linkExists,
+  listLinks,
+  saveLink,
+} from '../utils/links-db';
 import type { RgRequest, RgResponse } from '../utils/messages';
 
 const ID_RE = /^[\w-]+$/;
+const DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_BASE_DELAY_MS = 500;
 
 function base64ToBytes(base64: string): Uint8Array {
   return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Reintenta la descarga con backoff exponencial (500ms, 1s, 2s...) antes de
+// darse por vencido. Cubre fallos transitorios (permiso pedido recién ahora,
+// hiccup de disco); si el motivo es permanente (ej. sin espacio) el último
+// intento igual falla y se lo devolvemos al usuario con el mensaje real.
+async function downloadWithRetry(
+  options: Parameters<typeof browser.downloads.download>[0],
+  attempts = DOWNLOAD_ATTEMPTS,
+): Promise<number> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await browser.downloads.download(options);
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await sleep(DOWNLOAD_BASE_DELAY_MS * 2 ** i);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 // Solo aceptamos links https de redgifs.com
@@ -28,7 +63,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
       // Se descarga desde el background: sigue aunque cierres la pestaña
-      const downloadId = await browser.downloads.download({
+      const downloadId = await downloadWithRetry({
         url: msg.url,
         filename: `redgifs/${msg.id}.${extensionOf(msg.url)}`,
         conflictAction: 'uniquify',
@@ -57,6 +92,36 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       return { ok: true, total: await getTotal() };
     case 'RG_CHECK_LINK':
       return { ok: true, exists: await linkExists(msg.id) };
+    case 'RG_LIST_LINKS':
+      return { ok: true, links: await listLinks() };
+    case 'RG_DELETE_LINK':
+      return { ok: true, total: await deleteLink(msg.id) };
+    case 'RG_DOWNLOAD_ALL': {
+      // Descarga en batch todo lo guardado. Ojo: las URLs vienen firmadas
+      // por la API de RedGifs y pueden vencer con el tiempo, así que un
+      // link viejo puede fallar acá aunque haya sido válido al guardarlo.
+      const links = await listLinks();
+      let queued = 0;
+      let failed = 0;
+      for (const link of links) {
+        if (!isRedgifsUrl(link.url)) {
+          failed++;
+          continue;
+        }
+        try {
+          await downloadWithRetry({
+            url: link.url,
+            filename: `redgifs/${link.gifId}.${extensionOf(link.url)}`,
+            conflictAction: 'uniquify',
+            saveAs: false,
+          });
+          queued++;
+        } catch {
+          failed++;
+        }
+      }
+      return { ok: true, queued, failed };
+    }
     case 'RG_IMPORT_DB': {
       const { imported, updated, total } = await importDb(base64ToBytes(msg.base64));
       return { ok: true, imported, updated, total };
