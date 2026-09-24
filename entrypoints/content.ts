@@ -23,6 +23,8 @@ export default defineContentScript({
     const LANGUAGE_KEY = 'rgLanguage';
     let language: PopupLanguage = 'en';
     const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
+    let scrollDirection: 'down' | 'up' = 'down';
+    const previousScrollOffsets = new WeakMap<object, number>();
 
     // Las 4 esquinas entre las que se puede mover el panel con el botón ⇄.
     const PANEL_POSITIONS: Array<{ top?: string; bottom?: string; left?: string; right?: string }> = [
@@ -301,15 +303,35 @@ export default defineContentScript({
         removeDownloadActions();
         return;
       }
-      const heart = document.querySelector<HTMLButtonElement>('button.LikeButton');
+
+      const active = getActiveItem();
+      const isVisible = (element: HTMLElement): boolean => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 &&
+          rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+      };
+      // RedGifs reuses/replaces its floating action bar as the feed advances.
+      // Anchor to the selected 30%-visible feed item first; a document-wide
+      // querySelector picked the first (often offscreen) LikeButton and left
+      // our action attached to a previous card.
+      const activeHeart = active?.root?.querySelector<HTMLButtonElement>('button.LikeButton');
+      const heart = activeHeart && isVisible(activeHeart)
+        ? activeHeart
+        : Array.from(document.querySelectorAll<HTMLButtonElement>('button.LikeButton')).find(isVisible);
       const heartItem = heart?.closest<HTMLElement>('li.sideBarItem');
       const list = heartItem?.parentElement;
       if (!heart || !heartItem || !list) return;
 
-      let item = list.querySelector<HTMLElement>(':scope > .rg-download-action');
+      let item = document.querySelector<HTMLElement>('.rg-download-action');
+      document.querySelectorAll<HTMLElement>('.rg-download-action').forEach(other => {
+        if (other !== item) other.remove();
+      });
       if (!item) {
         item = document.createElement('li');
-        item.className = `${heartItem.className} rg-download-action`;
+      }
+      item.className = `${heartItem.className} rg-download-action`;
+      if (!item.querySelector('.rg-download-button')) {
         const button = document.createElement('button');
         button.className = `${heart.className.replace(/\bLikeButton\b/g, '').trim()} rg-download-button`;
         button.type = 'button';
@@ -363,10 +385,9 @@ export default defineContentScript({
         const label = button.querySelector<HTMLElement>('.label');
         if (label && !button.disabled) label.textContent = t('download');
       }
-      const active = getActiveItem();
       if (active?.id) item.dataset.gifId = active.id;
       const next = heartItem.nextElementSibling;
-      if (next !== item) list.insertBefore(item, next);
+      if (item.parentElement !== list || next !== item) list.insertBefore(item, next);
     }
 
     function fileToBase64(file: File): Promise<string> {
@@ -971,22 +992,29 @@ export default defineContentScript({
     //     cercano al centro vertical de la pantalla (best-effort: si el
     //     markup cambia, esto sigue detectando el video en lugar de fallar).
     function getActiveItem(): { id: string; root: HTMLElement | null } | null {
-      // Al desplazarse por el feed, RedGifs a veces deja la clase "activa"
-      // en el tile anterior. Usamos primero el video visible más cercano al
-      // centro y dejamos esa clase como respaldo.
+      // En el feed continuo, cambia al siguiente video tan pronto como al
+      // menos el 30% de su tarjeta entra en el viewport. Elegir por centro
+      // hacía que el icono de descarga se quedara asociado al video anterior
+      // durante demasiado scroll.
       const items = Array.from(document.querySelectorAll<HTMLElement>('[data-feed-item-id]'));
       if (items.length) {
-        const viewportCenter = window.innerHeight / 2;
-        let best: { id: string; el: HTMLElement; dist: number } | null = null;
+        const candidates: Array<{ id: string; el: HTMLElement; top: number }> = [];
         for (const item of items) {
           const rect = item.getBoundingClientRect();
-          if (rect.bottom < 0 || rect.top > window.innerHeight) continue; // fuera de vista
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+          const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+          const visibleRatio = (visibleHeight * visibleWidth) / (rect.height * rect.width);
+          if (visibleRatio < 0.3) continue;
           const id = item.getAttribute('data-feed-item-id');
-          if (!id) continue;
-          const dist = Math.abs(rect.top + rect.height / 2 - viewportCenter);
-          if (!best || dist < best.dist) best = { id, el: item, dist };
+          if (!id || id.includes('feed-module')) continue;
+          candidates.push({ id, el: item, top: rect.top });
         }
-        if (best) return { id: best.id, root: best.el };
+        if (candidates.length) {
+          candidates.sort((a, b) => a.top - b.top);
+          const next = scrollDirection === 'down' ? candidates.at(-1)! : candidates[0]!;
+          return { id: next.id, root: next.el };
+        }
       }
 
       const active = document.querySelector<HTMLElement>(ACTIVE_ITEM_SELECTOR);
@@ -1069,6 +1097,20 @@ export default defineContentScript({
 
     // Agrupa muchos eventos seguidos en una sola ejecución por frame
     let scheduled = false;
+    function handleScroll(event: Event): void {
+      const target = event.target;
+      let offset: number | null = null;
+      if (target === window) offset = window.scrollY;
+      else if (target === document) offset = document.scrollingElement?.scrollTop ?? window.scrollY;
+      else if (target instanceof Element) offset = target.scrollTop;
+      if (target && typeof target === 'object' && offset !== null) {
+        const previous = previousScrollOffsets.get(target);
+        if (previous !== undefined && offset !== previous) scrollDirection = offset > previous ? 'down' : 'up';
+        previousScrollOffsets.set(target, offset);
+      }
+      scheduleUpdate();
+    }
+
     function scheduleUpdate(): void {
       if (scheduled) return;
       scheduled = true;
@@ -1130,8 +1172,8 @@ export default defineContentScript({
         collapseBtn.textContent = '+';
       }
 
-      ctx.addEventListener(window, 'scroll', scheduleUpdate, { passive: true });
-      ctx.addEventListener(document, 'scroll', scheduleUpdate, { capture: true, passive: true });
+      ctx.addEventListener(window, 'scroll', handleScroll, { passive: true });
+      ctx.addEventListener(document, 'scroll', handleScroll, { capture: true, passive: true });
       observer.observe(document.body, {
         attributes: true,
         childList: true,
