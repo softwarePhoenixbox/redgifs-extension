@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LinkRow } from '../../utils/links-db';
 import type { ExportFormat, GridSelectionItem, RgRequest, RgResponse } from '../../utils/messages';
+import { DEFAULT_DOWNLOAD_OPTIONS, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../../utils/download-options';
 import { popupMessage, type PopupLanguage } from '../../utils/popup-i18n';
 
 async function send(request: RgRequest, language: PopupLanguage): Promise<RgResponse> {
@@ -68,17 +69,17 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelEnabled, setPanelEnabled] = useState(false);
   const [downloadActionEnabled, setDownloadActionEnabled] = useState(true);
-  const [downloadQuality, setDownloadQuality] = useState<'hd' | 'sd' | 'both'>('hd');
+  const [downloadOptions, setDownloadOptions] = useState<DownloadOptions>(DEFAULT_DOWNLOAD_OPTIONS);
   const [language, setLanguage] = useState<PopupLanguage>('en');
   const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
   useEffect(() => {
-    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage', 'rgDownloadQuality']).then(values => {
+    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage', 'rgDownloadQuality', 'rgDownloadOptions']).then(values => {
       setPanelEnabled(values.rgPanelEnabled === true);
       setDownloadActionEnabled(values.rgDownloadActionEnabled !== false);
       const savedLanguage: PopupLanguage = values.rgLanguage === 'es' ? 'es' : 'en';
       setLanguage(savedLanguage);
-      setDownloadQuality(values.rgDownloadQuality === 'sd' || values.rgDownloadQuality === 'both' ? values.rgDownloadQuality : 'hd');
+      setDownloadOptions(normalizeDownloadOptions(values.rgDownloadOptions, values.rgDownloadQuality));
       document.documentElement.lang = savedLanguage;
     });
   }, []);
@@ -95,9 +96,10 @@ export default function App() {
     await browser.storage.local.set({ [key]: enabled });
   }
 
-  async function updateDownloadQuality(value: 'hd' | 'sd' | 'both') {
-    setDownloadQuality(value);
-    await browser.storage.local.set({ rgDownloadQuality: value });
+  async function updateDownloadOption(choice: DownloadChoice, enabled: boolean) {
+    const next = { ...downloadOptions, [choice]: enabled };
+    setDownloadOptions(next);
+    await browser.storage.local.set({ rgDownloadOptions: next });
   }
 
   // El estado de este popup se reinicia cada vez que se cierra y se vuelve
@@ -281,14 +283,16 @@ export default function App() {
                 <option value="es">{t('languageSpanish')}</option>
               </select>
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0' }}>
-              {t('downloadQuality')}
-              <select value={downloadQuality} onChange={e => void updateDownloadQuality(e.target.value as 'hd' | 'sd' | 'both')} style={{ marginLeft: 'auto', background: '#292929', color: '#eee', border: '1px solid #555', borderRadius: 4, padding: '3px 6px' }}>
-                <option value="hd">{t('qualityHd')}</option>
-                <option value="sd">{t('qualitySd')}</option>
-                <option value="both">{t('qualityBoth')}</option>
-              </select>
-            </label>
+            <div style={{ color: '#ccc', padding: '4px 0' }}>
+              <strong style={{ display: 'block', fontWeight: 500, marginBottom: 2 }}>{t('downloadOptions')}</strong>
+              {(['hd', 'sd', 'image'] as const).map(choice => (
+                <label key={choice} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={downloadOptions[choice]} onChange={e => void updateDownloadOption(choice, e.target.checked)} />
+                  {t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : 'downloadImage')}
+                </label>
+              ))}
+              <small style={{ display: 'block', color: '#999', lineHeight: 1.3, marginTop: 2 }}>{t('downloadOptionsHint')}</small>
+            </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>
               <input type="checkbox" checked={panelEnabled} onChange={e => void updateSetting('rgPanelEnabled', e.target.checked)} />
               {t('showPanel')}

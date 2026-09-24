@@ -234,14 +234,26 @@ function extensionOf(url: string): string {
   return match?.[1]?.toLowerCase() ?? 'mp4';
 }
 
+function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'image'): string {
+  const mediaUrl = new URL(url);
+  let name = mediaUrl.pathname.split('/').filter(Boolean).at(-1) ?? '';
+  try { name = decodeURIComponent(name); } catch { /* keep the encoded segment */ }
+  if (!/^[\w-]+\.(?:mp4|m4v|jpg|jpeg|png)$/i.test(name)) {
+    const suffix = quality === 'sd' || quality === 'image' ? '-mobile' : '';
+    name = `${id}${suffix}.${extensionOf(url)}`;
+  }
+  return `redgifs/${name}`;
+}
+
 async function startVideoDownload(
   id: string,
   url: string,
   metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
   quality?: 'hd' | 'sd' | 'image',
 ): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
-  const suffix = quality === 'sd' || quality === 'image' ? '-mobile' : '';
-  const filename = `redgifs/${id}${suffix}.${extensionOf(url)}`;
+  // Media URLs carry RedGifs' canonical case-sensitive ID (e.g.
+  // ZanyJudiciousRook-mobile.mp4); prefer it over lowercase /ifr/ IDs.
+  const filename = downloadFilename(id, url, quality);
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
     return {

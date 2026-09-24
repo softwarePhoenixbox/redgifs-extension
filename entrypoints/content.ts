@@ -1,5 +1,6 @@
 import type { ExportFormat, RgRequest, RgResponse } from '../utils/messages';
 import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
+import { DEFAULT_DOWNLOAD_OPTIONS, enabledDownloadChoices, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../utils/download-options';
 
 export default defineContentScript({
   matches: ['*://*.redgifs.com/*'],
@@ -22,6 +23,7 @@ export default defineContentScript({
     const PANEL_ENABLED_KEY = 'rgPanelEnabled';
     const DOWNLOAD_ACTION_ENABLED_KEY = 'rgDownloadActionEnabled';
     const DOWNLOAD_QUALITY_KEY = 'rgDownloadQuality';
+    const DOWNLOAD_OPTIONS_KEY = 'rgDownloadOptions';
     const LANGUAGE_KEY = 'rgLanguage';
     let language: PopupLanguage = 'en';
     const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
@@ -233,7 +235,7 @@ export default defineContentScript({
     let panelCollapsed = false;
     let panelEnabled = false;
     let downloadActionEnabled = true;
-    let downloadQuality: 'hd' | 'sd' | 'both' = 'hd';
+    let downloadOptions: DownloadOptions = DEFAULT_DOWNLOAD_OPTIONS;
 
     moveBtn.addEventListener('click', () => {
       panelPositionIdx = (panelPositionIdx + 1) % PANEL_POSITIONS.length;
@@ -303,29 +305,29 @@ export default defineContentScript({
       return hd.replace(/\.mp4(?=([?#]|$))/i, '-mobile.mp4');
     }
 
-    function showQualityMenu(anchor: HTMLElement, onChoose: (quality: 'hd' | 'sd') => void): void {
+    function showDownloadMenu(anchor: HTMLElement, choices: DownloadChoice[], onChoose: (choice: DownloadChoice) => void): void {
       document.getElementById('rg-quality-menu')?.remove();
       const rect = anchor.getBoundingClientRect();
       const menu = document.createElement('div');
       menu.id = 'rg-quality-menu';
-      menu.style.cssText = `position:fixed;z-index:10010;top:${Math.min(rect.bottom + 5, window.innerHeight - 90)}px;left:${Math.max(8, Math.min(rect.left, window.innerWidth - 128))}px;display:flex;gap:5px;padding:6px;background:#181818;border:1px solid #555;border-radius:7px;box-shadow:0 5px 18px #0009;`;
+      menu.style.cssText = `position:fixed;z-index:10010;top:${Math.min(rect.bottom + 5, window.innerHeight - 90)}px;left:${Math.max(8, Math.min(rect.left, window.innerWidth - 150))}px;display:flex;gap:5px;padding:6px;background:#181818;border:1px solid #555;border-radius:7px;box-shadow:0 5px 18px #0009;`;
       const dismiss = (event: Event) => {
         if (!menu.contains(event.target as Node) && event.target !== anchor) {
           menu.remove();
           document.removeEventListener('pointerdown', dismiss, true);
         }
       };
-      for (const quality of ['hd', 'sd'] as const) {
+      for (const choice of choices) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = quality.toUpperCase();
+        button.textContent = t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : 'downloadImage');
         button.style.cssText = 'border:0;border-radius:5px;padding:6px 12px;background:#2f6bff;color:#fff;font:bold 12px sans-serif;cursor:pointer;';
         button.addEventListener('click', event => {
           event.preventDefault();
           event.stopPropagation();
           menu.remove();
           document.removeEventListener('pointerdown', dismiss, true);
-          onChoose(quality);
+          onChoose(choice);
         }, { once: true });
         menu.appendChild(button);
       }
@@ -333,26 +335,34 @@ export default defineContentScript({
       setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
     }
 
-    function requestQuality(anchor: HTMLElement, action: (quality: 'hd' | 'sd') => void): void {
-      if (downloadQuality === 'both') showQualityMenu(anchor, action);
-      else action(downloadQuality);
+    function requestDownloadChoice(anchor: HTMLElement, action: (choice: DownloadChoice) => void): void {
+      const choices = enabledDownloadChoices(downloadOptions);
+      if (choices.length > 1) showDownloadMenu(anchor, choices, action);
+      else if (choices.length === 1) action(choices[0]!);
+      else showToast(t('noDownloadOptions'), 'error');
     }
 
-    async function downloadGifQuality(id: string, quality: 'hd' | 'sd', root: HTMLElement | null): Promise<void> {
+    async function downloadGifChoice(id: string, choice: DownloadChoice, root: HTMLElement | null): Promise<void> {
       const result = await getValidLink(id);
       if (result.kind !== 'ok') throw new Error(result.kind === 'error' ? result.message : t('videoUnavailable'));
-      const url = quality === 'sd' ? mobileVideoUrl(result) : (result.hdVideoUrl ?? result.videoUrl);
+      const hdUrl = result.hdVideoUrl ?? result.videoUrl;
+      const url = choice === 'image'
+        ? hdUrl.replace(/(?:-mobile)?\.mp4(?=([?#]|$))/i, '-mobile.jpg')
+        : choice === 'sd' ? mobileVideoUrl(result) : hdUrl;
       const domMeta = scrapeMeta(root ?? document.body);
       const apiMeta = result.metadata;
       const download = await send({
-        type: 'RG_DOWNLOAD', id, url, quality,
-        title: domMeta.title ?? apiMeta?.title ?? undefined,
-        author: domMeta.author ?? apiMeta?.author ?? undefined,
-        tags: domMeta.tags.length ? domMeta.tags : (apiMeta?.tags ?? []),
-        pageUrl: location.href,
+        type: 'RG_DOWNLOAD', id, url, quality: choice,
+        ...(choice === 'image' ? {} : {
+          title: domMeta.title ?? apiMeta?.title ?? undefined,
+          author: domMeta.author ?? apiMeta?.author ?? undefined,
+          tags: domMeta.tags.length ? domMeta.tags : (apiMeta?.tags ?? []),
+          pageUrl: location.href,
+        }),
       });
       if (!download.ok) throw new Error(download.error);
-      showToast(download.metadata_embedded ? t('downloadStartedMetadata') : (download.metadata_warning ?? t('downloadedWithoutMetadata')), download.metadata_embedded ? 'ok' : 'error');
+      if (choice === 'image') showToast(t('imageDownloadStarted'));
+      else showToast(download.metadata_embedded ? t('downloadStartedMetadata') : (download.metadata_warning ?? t('downloadedWithoutMetadata')), download.metadata_embedded ? 'ok' : 'error');
     }
 
     function removeDownloadActions(): void {
@@ -398,10 +408,10 @@ export default defineContentScript({
           button.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
-            requestQuality(button, quality => {
+            requestDownloadChoice(button, quality => {
               button.disabled = true;
               label.textContent = t('preparing');
-              void downloadGifQuality(id, quality, null).catch(error => {
+              void downloadGifChoice(id, quality, null).catch(error => {
                 showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
               }).finally(() => {
                 button.disabled = false;
@@ -461,10 +471,10 @@ export default defineContentScript({
           const active = getActiveItem();
           const id = active?.id || item?.dataset.gifId;
           if (!id) return;
-          requestQuality(button, quality => {
+          requestDownloadChoice(button, quality => {
             button.disabled = true;
             label.textContent = t('preparing');
-            void downloadGifQuality(id, quality, active?.root ?? null).catch(error => {
+            void downloadGifChoice(id, quality, active?.root ?? null).catch(error => {
               showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
             }).finally(() => {
               if (label.isConnected) label.textContent = t('download');
@@ -578,19 +588,28 @@ export default defineContentScript({
       dlBox.append(dlButton, dlStatus);
 
       dlButton.addEventListener('click', () => {
-        requestQuality(dlButton, quality => {
+        requestDownloadChoice(dlButton, quality => {
           dlButton.disabled = true;
           setStatus(dlStatus, t('downloadingEmbedding'));
           void (async () => {
-            const selectedUrl = quality === 'sd' ? mobileVideoUrl(result) : (result.hdVideoUrl ?? result.videoUrl);
+            const hdUrl = result.hdVideoUrl ?? result.videoUrl;
+            const selectedUrl = quality === 'image'
+              ? hdUrl.replace(/(?:-mobile)?\.mp4(?=([?#]|$))/i, '-mobile.jpg')
+              : quality === 'sd' ? mobileVideoUrl(result) : hdUrl;
             const res = await send({
               type: 'RG_DOWNLOAD', id, url: selectedUrl, quality,
-              title: meta.title ?? undefined,
-              author: meta.author ?? undefined,
-              tags: meta.tags,
-              pageUrl: location.href,
+              ...(quality === 'image' ? {} : {
+                title: meta.title ?? undefined,
+                author: meta.author ?? undefined,
+                tags: meta.tags,
+                pageUrl: location.href,
+              }),
             });
             if (!res.ok) throw new Error(res.error);
+            if (quality === 'image') {
+              setStatus(dlStatus, t('imageDownloadStarted'), 'ok');
+              return;
+            }
             setStatus(
               dlStatus,
               res.metadata_embedded
@@ -1248,6 +1267,7 @@ export default defineContentScript({
         PANEL_ENABLED_KEY,
         DOWNLOAD_ACTION_ENABLED_KEY,
         DOWNLOAD_QUALITY_KEY,
+        DOWNLOAD_OPTIONS_KEY,
         LANGUAGE_KEY,
       ]);
       autoSave = stored[AUTO_SAVE_KEY] === true;
@@ -1256,7 +1276,7 @@ export default defineContentScript({
       panelCollapsed = stored[PANEL_COLLAPSED_KEY] === true;
       panelEnabled = stored[PANEL_ENABLED_KEY] === true;
       downloadActionEnabled = stored[DOWNLOAD_ACTION_ENABLED_KEY] !== false;
-      downloadQuality = stored[DOWNLOAD_QUALITY_KEY] === 'sd' || stored[DOWNLOAD_QUALITY_KEY] === 'both' ? stored[DOWNLOAD_QUALITY_KEY] : 'hd';
+      downloadOptions = normalizeDownloadOptions(stored[DOWNLOAD_OPTIONS_KEY], stored[DOWNLOAD_QUALITY_KEY]);
       language = stored[LANGUAGE_KEY] === 'es' ? 'es' : 'en';
       panel.querySelector('#rg-panel-title')!.textContent = t('panelTitle');
       moveBtn.title = t('movePanel');
@@ -1295,9 +1315,10 @@ export default defineContentScript({
         downloadActionEnabled = changes[DOWNLOAD_ACTION_ENABLED_KEY].newValue !== false;
         paintDownloadAction();
       }
-      if (changes[DOWNLOAD_QUALITY_KEY]) {
-        const value = changes[DOWNLOAD_QUALITY_KEY].newValue;
-        downloadQuality = value === 'sd' || value === 'both' ? value : 'hd';
+      if (changes[DOWNLOAD_OPTIONS_KEY]) {
+        downloadOptions = normalizeDownloadOptions(changes[DOWNLOAD_OPTIONS_KEY].newValue);
+      } else if (changes[DOWNLOAD_QUALITY_KEY] && !changes[DOWNLOAD_OPTIONS_KEY]) {
+        downloadOptions = normalizeDownloadOptions(undefined, changes[DOWNLOAD_QUALITY_KEY].newValue);
       }
       if (changes[LANGUAGE_KEY]) {
         language = changes[LANGUAGE_KEY].newValue === 'es' ? 'es' : 'en';
