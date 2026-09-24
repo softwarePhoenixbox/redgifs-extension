@@ -56,7 +56,7 @@ export type RgRequest =
   | { type: 'RG_SAVE_BULK'; links: BulkLinkInput[] }
   | { type: 'RG_STATS' }
   | { type: 'RG_CHECK_LINK'; id: string }
-  | { type: 'RG_EXPORT_DB'; format: ExportFormat }
+  | { type: 'RG_EXPORT_DB'; format: ExportFormat; language?: 'en' | 'es' }
   | { type: 'RG_IMPORT_DB'; base64: string }
   | { type: 'RG_LIST_LINKS' }
   | { type: 'RG_DELETE_LINK'; id: string }

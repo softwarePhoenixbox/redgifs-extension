@@ -434,12 +434,12 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
         case 'xlsx':
           return {
             ok: true,
-            base64: bytesToBase64(buildXlsx(await listLinks())),
+            base64: bytesToBase64(buildXlsx(await listLinks(), msg.language ?? 'en')),
             filename: 'redgifs-links.xlsx',
             mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           };
         case 'html': {
-          const html = await buildHtml(await listLinks());
+          const html = await buildHtml(await listLinks(), msg.language ?? 'en');
           return {
             ok: true,
             base64: bytesToBase64(new TextEncoder().encode(html)),

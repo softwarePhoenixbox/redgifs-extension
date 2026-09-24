@@ -1,4 +1,5 @@
 import type { ExportFormat, RgRequest, RgResponse } from '../utils/messages';
+import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
 
 export default defineContentScript({
   matches: ['*://*.redgifs.com/*'],
@@ -19,6 +20,9 @@ export default defineContentScript({
     const PANEL_COLLAPSED_KEY = 'rgPanelCollapsed';
     const PANEL_ENABLED_KEY = 'rgPanelEnabled';
     const DOWNLOAD_ACTION_ENABLED_KEY = 'rgDownloadActionEnabled';
+    const LANGUAGE_KEY = 'rgLanguage';
+    let language: PopupLanguage = 'en';
+    const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
     // Las 4 esquinas entre las que se puede mover el panel con el botón ⇄.
     const PANEL_POSITIONS: Array<{ top?: string; bottom?: string; left?: string; right?: string }> = [
@@ -183,14 +187,14 @@ export default defineContentScript({
   'position:fixed; top:20px; left:20px; z-index:10000; background:rgba(18,18,18,0.98); color:white; padding:15px; border-radius:12px; font-family:sans-serif; width:300px; border:1px solid #00ff00; box-shadow:0 10px 30px rgba(0,0,0,0.8); display:flex; flex-direction:column;';
     panel.innerHTML = `
       <div id="rg-header" style="font-weight:bold; border-bottom:1px solid #444; padding-bottom:10px; margin-bottom:10px; color:#00ff00; display:flex; align-items:center; gap:8px;">
-        <span>🎯 Video en Pantalla</span>
+        <span id="rg-panel-title">${t('panelTitle')}</span>
         <div style="margin-left:auto; display:flex; gap:6px;">
-          <button id="rg-move-btn" title="Cambiar posición" style="background:transparent; border:none; color:#9fd3ff; font-size:13px; cursor:pointer; font-family:inherit; padding:0 2px;">⇄</button>
-          <button id="rg-collapse-btn" title="Minimizar" style="background:transparent; border:none; color:#00ff00; font-size:14px; font-weight:bold; cursor:pointer; font-family:inherit; padding:0 2px;">–</button>
+          <button id="rg-move-btn" title="${t('movePanel')}" style="background:transparent; border:none; color:#9fd3ff; font-size:13px; cursor:pointer; font-family:inherit; padding:0 2px;">⇄</button>
+          <button id="rg-collapse-btn" title="${t('minimize')}" style="background:transparent; border:none; color:#00ff00; font-size:14px; font-weight:bold; cursor:pointer; font-family:inherit; padding:0 2px;">–</button>
         </div>
       </div>
       <div id="rg-content" style="font-size:12px; min-height:80px; display:flex; align-items:center; justify-content:center;">
-        <p style="color:#888; text-align:center;">Mueve el scroll para detectar el video...</p>
+        <p style="color:#888; text-align:center;">${t('detectPrompt')}</p>
       </div>
     `;
     document.body.appendChild(panel);
@@ -223,7 +227,7 @@ export default defineContentScript({
     let autoSaveMinViews = 0;
     let panelPositionIdx = 0;
     let panelCollapsed = false;
-    let panelEnabled = true;
+    let panelEnabled = false;
     let downloadActionEnabled = true;
 
     moveBtn.addEventListener('click', () => {
@@ -274,7 +278,7 @@ export default defineContentScript({
         if (!response.ok) return { kind: 'error', message: response.error };
         if (response.not_found) return { kind: 'not_found' };
         if (response.rate_limited) return { kind: 'rate_limited' };
-        if (!response.gif) return { kind: 'error', message: 'La API no devolvió la URL del video' };
+        if (!response.gif) return { kind: 'error', message: t('apiMissingUrl') };
         const resolved: ResolvedGif = { kind: 'ok', ...response.gif };
         // La URL de media puede expirar; reutilizamos la consulta compartida
         // unos minutos para evitar dobles llamadas al hacer scroll/clic.
@@ -309,13 +313,13 @@ export default defineContentScript({
         const button = document.createElement('button');
         button.className = `${heart.className.replace(/\bLikeButton\b/g, '').trim()} rg-download-button`;
         button.type = 'button';
-        button.title = 'Descargar video con metadatos';
-        button.setAttribute('aria-label', 'Descargar video');
+        button.title = t('downloadWithMetadata');
+        button.setAttribute('aria-label', t('downloadVideo'));
         button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;';
         button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
         const label = document.createElement('span');
         label.className = 'label';
-        label.textContent = 'Descargar';
+        label.textContent = t('download');
         label.style.cssText = 'font-size:12px;color:#fff;';
         button.appendChild(label);
         item.appendChild(button);
@@ -329,10 +333,10 @@ export default defineContentScript({
           const id = active?.id || item?.dataset.gifId;
           if (!id) return;
           button.disabled = true;
-          label.textContent = 'Preparando…';
+          label.textContent = t('preparing');
           try {
             const result = await getValidLink(id);
-            if (result.kind !== 'ok') throw new Error(result.kind === 'error' ? result.message : 'No se pudo resolver el video');
+            if (result.kind !== 'ok') throw new Error(result.kind === 'error' ? result.message : t('videoUnavailable'));
             const domMeta = scrapeMeta(active?.root ?? document.body);
             const apiMeta = result.metadata;
             const download = await send({
@@ -343,14 +347,21 @@ export default defineContentScript({
               pageUrl: location.href,
             });
             if (!download.ok) throw new Error(download.error);
-            label.textContent = 'Descargado';
-            showToast('✔ Descarga iniciada con metadatos', 'ok');
+            label.textContent = t('downloaded');
+            showToast(t('downloadStartedMetadata'), 'ok');
           } catch (error) {
             label.textContent = 'Error';
-            showToast(`✖ ${error instanceof Error ? error.message : 'No se pudo descargar'}`, 'error');
+            showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
           }
-          setTimeout(() => { if (label.isConnected) label.textContent = 'Descargar'; button.disabled = false; }, 2500);
+          setTimeout(() => { if (label.isConnected) label.textContent = t('download'); button.disabled = false; }, 2500);
         });
+      }
+      const button = item.querySelector<HTMLButtonElement>('.rg-download-button');
+      if (button) {
+        button.title = t('downloadWithMetadata');
+        button.setAttribute('aria-label', t('downloadVideo'));
+        const label = button.querySelector<HTMLElement>('.label');
+        if (label && !button.disabled) label.textContent = t('download');
       }
       const active = getActiveItem();
       if (active?.id) item.dataset.gifId = active.id;
@@ -373,7 +384,7 @@ export default defineContentScript({
         createEl(
           'div',
           'color:#888; font-size:11px; text-align:center; width:100%;',
-          `Cargando datos de: ${id}...`,
+          t('loading', { id }),
         ),
       );
     }
@@ -381,9 +392,9 @@ export default defineContentScript({
     function renderError(id: string, result: Exclude<GifLinkResult, { kind: 'ok' }>): void {
       const text =
         result.kind === 'not_found'
-          ? '🚫 Video no disponible (borrado, privado o aún procesándose)'
+          ? t('videoUnavailable')
           : result.kind === 'rate_limited'
-            ? '⏳ RedGifs está limitando los pedidos, esperá unos segundos...'
+            ? t('rateLimited')
             : `✖ ${result.message}`;
 
       content.replaceChildren(
@@ -418,7 +429,7 @@ export default defineContentScript({
         createEl(
           'div',
           'font-weight:bold; font-size:12px; color:#ddd; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
-          meta.title ? `🎥 ${meta.title}` : '🎥 Viendo ahora:',
+          meta.title ? `🎥 ${meta.title}` : t('viewingNow'),
         ),
         createEl('div', 'color:#888; font-size:10px;', meta.author ? `${id} · @${meta.author}` : id),
       );
@@ -444,13 +455,13 @@ export default defineContentScript({
 
       // --- Zona AZUL: descarga en segundo plano (background.ts) ---
       const dlBox = createEl('div', 'display:flex; flex-direction:column; gap:4px;');
-      const dlButton = createEl('button', buttonCss(BLUE, 'white'), '⬇ DESCARGAR (segundo plano)');
+      const dlButton = createEl('button', buttonCss(BLUE, 'white'), t('downloadButton'));
       const dlStatus = createEl('div', 'font-size:10px; color:#aaa; min-height:12px;');
       dlBox.append(dlButton, dlStatus);
 
       dlButton.addEventListener('click', async () => {
         dlButton.disabled = true;
-        setStatus(dlStatus, 'Descargando e incrustando metadatos…');
+        setStatus(dlStatus, t('downloadingEmbedding'));
         const res = await send({
           type: 'RG_DOWNLOAD',
           id,
@@ -464,8 +475,8 @@ export default defineContentScript({
           setStatus(
             dlStatus,
             res.metadata_embedded
-              ? '✔ Descarga iniciada con metadatos (Descargas/redgifs).'
-              : `⚠ ${res.metadata_warning ?? 'Descargado sin metadatos.'}`,
+              ? t('downloadStartedInFolder')
+              : `⚠ ${res.metadata_warning ?? t('downloadedWithoutMetadata')}`,
             res.metadata_embedded ? 'ok' : 'error',
           );
         }
@@ -475,7 +486,7 @@ export default defineContentScript({
 
       // --- Zona ROJA: capturador de links en SQLite ---
       const dbBox = createEl('div', 'display:flex; flex-direction:column; gap:6px;');
-      const saveButton = createEl('button', buttonCss(RED, 'white'), '💾 GUARDAR LINK EN SQLITE');
+      const saveButton = createEl('button', buttonCss(RED, 'white'), t('saveLinkSqlite'));
       const dbStatus = createEl('div', 'font-size:10px; color:#aaa; min-height:12px;');
 
       const dbRow = createEl(
@@ -486,8 +497,8 @@ export default defineContentScript({
       const autoCheck = createEl('input', 'margin:0; cursor:pointer;');
       autoCheck.type = 'checkbox';
       autoCheck.checked = autoSave;
-      autoLabel.append(autoCheck, document.createTextNode('Auto-guardar'));
-      const totalEl = createEl('span', 'color:#bbb;', 'Guardados: …');
+      autoLabel.append(autoCheck, document.createTextNode(t('autoSave')));
+      const totalEl = createEl('span', 'color:#bbb;', t('savedCount', { count: '…' }));
       dbRow.append(autoLabel, totalEl);
 
       // Umbral de vistas para el auto-guardado (0 = guarda siempre que esté
@@ -496,7 +507,7 @@ export default defineContentScript({
         'div',
         'display:flex; align-items:center; gap:6px; font-size:10px; color:#bbb;',
       );
-      const minViewsLabel = createEl('span', 'color:#bbb; white-space:nowrap;', 'Mín. vistas:');
+      const minViewsLabel = createEl('span', 'color:#bbb; white-space:nowrap;', t('minViews'));
       const minViewsInput = createEl(
         'input',
         'width:70px; background:#1c1c1c; color:#ddd; border:1px solid #555; border-radius:4px; font-size:10px; padding:3px 5px; font-family:inherit; box-sizing:border-box;',
@@ -505,7 +516,7 @@ export default defineContentScript({
       minViewsInput.min = '0';
       minViewsInput.placeholder = '0';
       minViewsInput.value = autoSaveMinViews ? String(autoSaveMinViews) : '';
-      minViewsInput.title = 'Auto-guardar solo si supera este número de vistas (vacío = siempre)';
+      minViewsInput.title = t('autoSaveThreshold');
       minViewsInput.addEventListener('change', () => {
         autoSaveMinViews = Math.max(0, Number(minViewsInput.value) || 0);
         void browser.storage.local.set({ [AUTO_SAVE_MIN_VIEWS_KEY]: autoSaveMinViews });
@@ -522,7 +533,7 @@ export default defineContentScript({
       const exportRow = createEl(
         'div',
         'display:flex; align-items:center; gap:4px; font-size:10px; color:#bbb;',
-        'Exportar:',
+        t('export'),
       );
       const exportButtons: HTMLButtonElement[] = [];
       const exportFormats: Array<[ExportFormat, string]> = [
@@ -541,12 +552,12 @@ export default defineContentScript({
           exportButtons.forEach(b => (b.disabled = true));
           setStatus(
             dbStatus,
-            format === 'html' ? 'Generando HTML (descargando imágenes)...' : 'Exportando...',
+            format === 'html' ? t('generatingHtml') : t('exporting'),
           );
-          const res = await send({ type: 'RG_EXPORT_DB', format });
+          const res = await send({ type: 'RG_EXPORT_DB', format, language });
           if (res.ok && res.base64 && res.filename) {
             saveBase64AsFile(res.base64, res.filename, res.mime ?? 'application/octet-stream');
-            setStatus(dbStatus, `✔ Exportado: ${res.filename}`, 'ok');
+            setStatus(dbStatus, t('exported', { filename: res.filename }), 'ok');
           } else if (!res.ok) {
             setStatus(dbStatus, `✖ ${res.error}`, 'error');
           }
@@ -564,7 +575,7 @@ export default defineContentScript({
       const importBtn = createEl(
         'button',
         'width:100%; background:#3a3a3a; color:#9fd3ff; border:1px solid #555; border-radius:4px; cursor:pointer; font-size:10px; padding:6px 0; font-family:inherit;',
-        '📥 Importar DB (fusionar, sin duplicar)',
+        t('importDb'),
       );
       importBtn.addEventListener('click', () => importInput.click());
 
@@ -572,18 +583,18 @@ export default defineContentScript({
         const file = importInput.files?.[0];
         if (!file) return;
         importBtn.disabled = true;
-        setStatus(dbStatus, 'Importando y fusionando...');
+        setStatus(dbStatus, t('importing'));
         try {
           const base64 = await fileToBase64(file);
           const res = await send({ type: 'RG_IMPORT_DB', base64 });
           if (res.ok) {
-            setStatus(dbStatus, `✔ ${res.imported ?? 0} nuevos, ${res.updated ?? 0} actualizados`, 'ok');
-            if (res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
+            setStatus(dbStatus, t('importCounts', { imported: res.imported ?? 0, updated: res.updated ?? 0 }), 'ok');
+            if (res.total !== undefined) totalEl.textContent = t('savedCount', { count: res.total });
           } else {
             setStatus(dbStatus, `✖ ${res.error}`, 'error');
           }
         } catch {
-          setStatus(dbStatus, '✖ No se pudo leer el archivo', 'error');
+          setStatus(dbStatus, t('readFileError'), 'error');
         }
         importInput.value = '';
         importBtn.disabled = false;
@@ -593,7 +604,7 @@ export default defineContentScript({
 
       async function saveCurrentLink(): Promise<void> {
         saveButton.disabled = true;
-        setStatus(dbStatus, 'Guardando...');
+        setStatus(dbStatus, t('saving'));
         // Se re-scrapea justo antes de guardar por si vistas/likes cambiaron
         // mientras el usuario miraba el video.
         const freshItem = document.querySelector<HTMLElement>(ACTIVE_ITEM_SELECTOR);
@@ -614,12 +625,12 @@ export default defineContentScript({
         });
         if (res.ok) {
           const alreadySaved = !res.inserted;
-          setStatus(dbStatus, alreadySaved ? 'ℹ Este link ya estaba guardado' : '✔ Link guardado', 'ok');
-          showToast(alreadySaved ? 'ℹ Este link ya estaba guardado' : '✔ Link guardado', 'ok');
-          if (res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
+          setStatus(dbStatus, alreadySaved ? t('alreadySaved') : t('linkSaved'), 'ok');
+          showToast(alreadySaved ? t('alreadySaved') : t('linkSaved'), 'ok');
+          if (res.total !== undefined) totalEl.textContent = t('savedCount', { count: res.total });
         } else {
           setStatus(dbStatus, `✖ ${res.error}`, 'error');
-          showToast(`✖ No se pudo guardar: ${res.error}`, 'error');
+          showToast(t('saveFailed', { error: res.error }), 'error');
         }
         saveButton.disabled = false;
       }
@@ -633,7 +644,7 @@ export default defineContentScript({
       });
 
       // --- Zona VERDE: solo abre el video (media.redgifs.com/....mp4) ---
-      const viewLink = createEl('a', buttonCss(GREEN, 'black'), '▶ VER VIDEO');
+      const viewLink = createEl('a', buttonCss(GREEN, 'black'), t('viewVideo'));
       viewLink.href = url;
       viewLink.target = '_blank';
       viewLink.rel = 'noopener noreferrer';
@@ -643,7 +654,7 @@ export default defineContentScript({
 
       // Contador inicial y auto-guardado
       void send({ type: 'RG_STATS' }).then(res => {
-        if (res.ok && res.total !== undefined) totalEl.textContent = `Guardados: ${res.total}`;
+        if (res.ok && res.total !== undefined) totalEl.textContent = t('savedCount', { count: res.total });
       });
       if (shouldAutoSave()) {
         void saveCurrentLink();
@@ -653,7 +664,7 @@ export default defineContentScript({
         // tenga que apretar "Guardar".
         void send({ type: 'RG_CHECK_LINK', id }).then(res => {
           if (res.ok && res.exists && currentActiveId === id) {
-            setStatus(dbStatus, 'ℹ Este link ya estaba guardado', 'ok');
+            setStatus(dbStatus, t('alreadySaved'), 'ok');
           }
         });
       }
@@ -684,12 +695,12 @@ export default defineContentScript({
       'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:10002; background:rgba(18,18,18,0.98); color:white; padding:10px 14px; border-radius:10px; font-family:sans-serif; border:1px solid #00ff00; box-shadow:0 10px 30px rgba(0,0,0,0.8); display:none; align-items:center; gap:10px; font-size:12px;',
     );
     gridBar.id = GRID_BAR_ID;
-    const gridBarCount = createEl('span', 'color:#9fd3ff; white-space:nowrap;', '0 seleccionados');
-    const gridBarSave = createEl('button', buttonCss(RED, 'white') + 'width:auto; padding:8px 14px;', '💾 Guardar seleccionados');
+    const gridBarCount = createEl('span', 'color:#9fd3ff; white-space:nowrap;', t('selectedCount', { count: 0 }));
+    const gridBarSave = createEl('button', buttonCss(RED, 'white') + 'width:auto; padding:8px 14px;', t('saveSelected'));
     const gridBarClear = createEl(
       'button',
       'background:#3a3a3a; color:#ddd; border:1px solid #555; cursor:pointer; padding:8px 12px; border-radius:6px; font-size:12px; font-family:inherit;',
-      'Limpiar',
+      language === 'en' ? 'Clear' : 'Limpiar',
     );
     const gridBarStatus = createEl('span', 'color:#aaa; font-size:10px; white-space:nowrap;', '');
     gridBar.append(gridBarCount, gridBarSave, gridBarClear, gridBarStatus);
@@ -697,8 +708,9 @@ export default defineContentScript({
 
     function updateGridBar(): void {
       const pending = Array.from(selectedIds.keys()).filter(id => !savedIds.has(id)).length;
-      gridBarCount.textContent =
-        savedIds.size > 0 ? `${pending} pendientes · ${savedIds.size} guardados 💾` : `${pending} seleccionados`;
+      gridBarCount.textContent = savedIds.size > 0
+        ? t('selectPendingSaved', { pending, saved: savedIds.size })
+        : t('selectedCount', { count: pending });
       gridBar.style.display = gridSelectMode ? 'flex' : 'none';
       gridBarSave.toggleAttribute('disabled', pending === 0);
     }
@@ -871,14 +883,14 @@ export default defineContentScript({
       }
 
       if (!links.length) {
-        setStatus(gridBarStatus, '✖ No se pudo resolver ninguno', 'error');
-        showToast('✖ No se pudo guardar ninguno', 'error');
+        setStatus(gridBarStatus, t('noItemsResolved'), 'error');
+        showToast(t('noItemsSaved'), 'error');
         gridBarSave.removeAttribute('disabled');
         gridBarClear.removeAttribute('disabled');
         return;
       }
 
-      setStatus(gridBarStatus, 'Guardando en la base...');
+      setStatus(gridBarStatus, t('savingDatabase'));
       const res = await send({ type: 'RG_SAVE_BULK', links });
       if (res.ok) {
         const inserted = res.inserted_count ?? 0;
@@ -1095,13 +1107,21 @@ export default defineContentScript({
         PANEL_COLLAPSED_KEY,
         PANEL_ENABLED_KEY,
         DOWNLOAD_ACTION_ENABLED_KEY,
+        LANGUAGE_KEY,
       ]);
       autoSave = stored[AUTO_SAVE_KEY] === true;
       autoSaveMinViews = typeof stored[AUTO_SAVE_MIN_VIEWS_KEY] === 'number' ? stored[AUTO_SAVE_MIN_VIEWS_KEY] : 0;
       panelPositionIdx = typeof stored[PANEL_POSITION_KEY] === 'number' ? stored[PANEL_POSITION_KEY] : 0;
       panelCollapsed = stored[PANEL_COLLAPSED_KEY] === true;
-      panelEnabled = stored[PANEL_ENABLED_KEY] !== false;
+      panelEnabled = stored[PANEL_ENABLED_KEY] === true;
       downloadActionEnabled = stored[DOWNLOAD_ACTION_ENABLED_KEY] !== false;
+      language = stored[LANGUAGE_KEY] === 'es' ? 'es' : 'en';
+      panel.querySelector('#rg-panel-title')!.textContent = t('panelTitle');
+      moveBtn.title = t('movePanel');
+      collapseBtn.title = t('minimize');
+      gridBarSave.textContent = t('saveSelected');
+      gridBarClear.textContent = language === 'en' ? 'Clear' : 'Limpiar';
+      updateGridBar();
       panel.style.display = panelEnabled ? 'flex' : 'none';
 
       applyPanelPosition(panelPositionIdx);
@@ -1120,17 +1140,30 @@ export default defineContentScript({
       });
       patchHistoryForSpaNav(scheduleUpdate);
       scheduleUpdate();
+      paintDownloadAction();
     })();
 
     browser.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'local') return;
       if (changes[PANEL_ENABLED_KEY]) {
-        panelEnabled = changes[PANEL_ENABLED_KEY].newValue !== false;
+        panelEnabled = changes[PANEL_ENABLED_KEY].newValue === true;
         panel.style.display = panelEnabled ? 'flex' : 'none';
       }
       if (changes[DOWNLOAD_ACTION_ENABLED_KEY]) {
         downloadActionEnabled = changes[DOWNLOAD_ACTION_ENABLED_KEY].newValue !== false;
         paintDownloadAction();
+      }
+      if (changes[LANGUAGE_KEY]) {
+        language = changes[LANGUAGE_KEY].newValue === 'es' ? 'es' : 'en';
+        panel.querySelector('#rg-panel-title')!.textContent = t('panelTitle');
+        moveBtn.title = t('movePanel');
+        collapseBtn.title = t('minimize');
+        gridBarSave.textContent = t('saveSelected');
+        gridBarClear.textContent = language === 'en' ? 'Clear' : 'Limpiar';
+        updateGridBar();
+        currentActiveId = null;
+        paintDownloadAction();
+        scheduleUpdate();
       }
     });
 

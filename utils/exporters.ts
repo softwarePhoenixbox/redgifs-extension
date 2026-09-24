@@ -1,5 +1,6 @@
 import { zipSync, strToU8 } from 'fflate';
 import { bytesToBase64, type LinkRow } from './links-db';
+import { popupMessage, type PopupLanguage } from './popup-i18n';
 
 // ---------- Utilidades ----------
 function escapeXml(value: string): string {
@@ -27,19 +28,10 @@ function tagsToText(tags: string[]): string {
 }
 
 // ---------- Excel (.xlsx) ----------
-const XLSX_HEADERS = [
-  'ID',
-  'Gif ID',
-  'Título',
-  'Autor',
-  'Tags',
-  'Vistas',
-  'Likes',
-  'Video (URL)',
-  'Imagen (URL)',
-  'Página',
-  'Fecha',
-] as const;
+function xlsxHeaders(language: PopupLanguage): string[] {
+  const t = (key: Parameters<typeof popupMessage>[1]) => popupMessage(language, key);
+  return ['ID', 'Gif ID', t('tableTitle'), t('tableAuthor'), t('tableTags'), t('tableViews'), 'Likes', `${t('tableVideo')} (URL)`, `${language === 'es' ? 'Imagen' : 'Image'} (URL)`, t('page'), t('tableDate')];
+}
 const XLSX_WIDTHS = [6, 30, 45, 20, 40, 10, 10, 55, 55, 60, 20];
 
 function colLetter(index: number): string {
@@ -53,8 +45,8 @@ function textCell(ref: string, value: string, style = 0): string {
   return `<c r="${ref}" t="inlineStr" s="${style}"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
 }
 
-export function buildXlsx(rows: LinkRow[]): Uint8Array {
-  const headerCells = XLSX_HEADERS.map((h, i) => textCell(`${colLetter(i)}1`, h, 1)).join('');
+export function buildXlsx(rows: LinkRow[], language: PopupLanguage = 'en'): Uint8Array {
+  const headerCells = xlsxHeaders(language).map((h, i) => textCell(`${colLetter(i)}1`, h, 1)).join('');
   const bodyRows = rows
     .map((row, i) => {
       const r = i + 2;
@@ -168,8 +160,9 @@ function tagChips(tags: string[]): string {
 
 // JS que corre dentro del HTML exportado. Escribe el atom Xtra directamente,
 // sin iniciar ffmpeg ni descargar un motor wasm de ~25 MB.
-const DOWNLOAD_SCRIPT = [
+const DOWNLOAD_SCRIPT = (language: PopupLanguage) => [
   '(function () {',
+  `  var EN = ${language === 'en'};`,
   "  var rowsEl = document.getElementById('rg-rows');",
   '  var ROWS = {};',
   '  try { ROWS = JSON.parse(rowsEl.textContent); } catch (e) { ROWS = {}; }',
@@ -409,25 +402,25 @@ const DOWNLOAD_SCRIPT = [
   '',
   '  async function downloadWithMetadata(id, btn, statusEl) {',
   '    var row = ROWS[id];',
-  "    if (!row) { statusEl.textContent = 'Sin datos guardados para incrustar'; return; }",
+    "    if (!row) { statusEl.textContent = EN ? 'No saved metadata found' : 'Sin datos guardados para incrustar'; return; }",
   '    btn.disabled = true;',
   '    try {',
-  "      statusEl.textContent = 'Descargando video...';",
+    "      statusEl.textContent = EN ? 'Downloading video...' : 'Descargando video...';",
   '      var resp = await fetch(row.url);',
   "      if (!resp.ok) throw new Error('HTTP ' + resp.status);",
   '      var bytes = new Uint8Array(await resp.arrayBuffer());',
   '',
   '      var ext = extOf(row.url);',
-  "      if (ext !== 'mp4' && ext !== 'm4v') throw new Error('La incrustación Xtra solo admite MP4/M4V');",
-  "      statusEl.textContent = 'Incrustando metadatos...';",
+    "      if (ext !== 'mp4' && ext !== 'm4v') throw new Error(EN ? 'Metadata embedding supports MP4/M4V only' : 'La incrustación Xtra solo admite MP4/M4V');",
+    "      statusEl.textContent = EN ? 'Embedding metadata...' : 'Incrustando metadatos...';",
   '      var fileBytes = bytes;',
   '',
       "      // El atom Xtra representa las propiedades multimedia de Windows.",
   '      var xtraPayload = buildXtraPayload(row.title, row.author, row.tags, row.pageUrl);',
-  "      if (!xtraPayload.length) throw new Error('No hay título, autor o tags guardados');",
+    "      if (!xtraPayload.length) throw new Error(EN ? 'No saved title, author, or tags' : 'No hay título, autor o tags guardados');",
   '      fileBytes = injectXtraBox(fileBytes, xtraPayload);',
   '      fileBytes = injectQuickTimeMetadata(fileBytes, row.title, row.author);',
-  "      var xtraStatus = 'Título, autor y tags incrustados; revisa las columnas en Windows.';",
+    "      var xtraStatus = EN ? 'Title, author, and tags embedded; check the Windows columns.' : 'Título, autor y tags incrustados; revisa las columnas en Windows.';",
   "      console.log('[RG Scroller] ' + xtraStatus);",
   '',
   "      var blob = new Blob([fileBytes], { type: 'video/mp4' });",
@@ -440,19 +433,19 @@ const DOWNLOAD_SCRIPT = [
   '      a.remove();',
   '      setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 15000);',
   '',
-  "      statusEl.textContent = 'Listo \u2714 -- ' + xtraStatus;",
+    "      statusEl.textContent = (EN ? 'Done \u2714 -- ' : 'Listo \u2714 -- ') + xtraStatus;",
   '      if (row.pageUrl) {',
   "        statusEl.appendChild(document.createTextNode(' '));",
   "        var shortcut = document.createElement('a');",
   "        var shortcutText = '[InternetShortcut]\\r\\nURL=' + row.pageUrl.replace(/[\\r\\n]/g, '') + '\\r\\n';",
   "        shortcut.href = URL.createObjectURL(new Blob([shortcutText], { type: 'application/internet-shortcut' }));",
   "        shortcut.download = id + '.url.txt';",
-  "        shortcut.textContent = 'Descargar URL (.txt; renombrar a .url)';",
+    "        shortcut.textContent = EN ? 'Download URL (.txt; rename to .url)' : 'Descargar URL (.txt; renombrar a .url)';",
   "        statusEl.appendChild(shortcut);",
   '      }',
   '    } catch (err) {',
   '      console.error(err);',
-  "      statusEl.textContent = 'Error: usa el link Video (' + (err && err.message ? err.message : err) + ')';",
+    "      statusEl.textContent = (EN ? 'Error: use the Video link (' : 'Error: usa el link Video (') + (err && err.message ? err.message : err) + ')';",
   '    } finally {',
   '      btn.disabled = false;',
   '    }',
@@ -467,7 +460,8 @@ const DOWNLOAD_SCRIPT = [
   '})();',
 ].join('\n');
 
-export async function buildHtml(rows: LinkRow[]): Promise<string> {
+export async function buildHtml(rows: LinkRow[], language: PopupLanguage = 'en'): Promise<string> {
+  const t = (key: Parameters<typeof popupMessage>[1]) => popupMessage(language, key);
   // Si una imagen no se puede descargar, se deja el link remoto como respaldo
   const images = await mapLimit(rows, 6, async row => {
     const url = safeHttpsUrl(row.imageUrl);
@@ -507,7 +501,7 @@ export async function buildHtml(rows: LinkRow[]): Promise<string> {
         : '';
       const hasVideo = safeHttpsUrl(row.url) !== null;
       const dlCell = hasVideo
-        ? `<button class="dlmeta" data-id="${escapeHtml(row.gifId)}">⬇ Con metadatos</button><div class="dlmeta-status"></div>`
+        ? `<button class="dlmeta" data-id="${escapeHtml(row.gifId)}">${t('metadataButton')}</button><div class="dlmeta-status"></div>`
         : '';
       return (
         `<tr>` +
@@ -520,7 +514,7 @@ export async function buildHtml(rows: LinkRow[]): Promise<string> {
         `<td class="num">${escapeHtml(row.views ?? '')}</td>` +
         `<td class="num">${escapeHtml(row.likes ?? '')}</td>` +
         `<td>${link(row.url, 'Video')}</td>` +
-        `<td>${link(row.pageUrl, 'Página')}</td>` +
+        `<td>${link(row.pageUrl, t('page'))}</td>` +
         `<td>${escapeHtml(row.createdAt)}</td>` +
         `<td class="dl">${dlCell}</td>` +
         `</tr>`
@@ -529,11 +523,11 @@ export async function buildHtml(rows: LinkRow[]): Promise<string> {
     .join('\n');
 
   return `<!doctype html>
-<html lang="es">
+<html lang="${language}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Links guardados (${rows.length})</title>
+<title>${t('savedLinks')} (${rows.length})</title>
 <style>
   body { font-family: system-ui, sans-serif; background: #121212; color: #eee; margin: 24px; }
   h1 { font-size: 18px; }
@@ -553,15 +547,14 @@ export async function buildHtml(rows: LinkRow[]): Promise<string> {
 </style>
 </head>
 <body>
-<h1>Links guardados: ${rows.length}</h1>
+<h1>${t('savedLinks')}: ${rows.length}</h1>
 <p style="color:#888; font-size:12px;">
-  "Con metadatos" incrusta título, autor y tags en el MP4. Para la columna URL, descarga
-  el acceso como .url.txt y renómbralo a .url; Chrome protege las descargas .url directas.
+  ${t('metadataInstructions')}
 </p>
 <table>
 <thead><tr>
-  <th>ID</th><th>Imagen</th><th>Gif ID</th><th>Título</th><th>Autor</th><th>Tags</th>
-  <th>Vistas</th><th>Likes</th><th>Video</th><th>Página</th><th>Fecha</th><th>Descargar</th>
+  <th>ID</th><th>${language === 'es' ? 'Imagen' : 'Image'}</th><th>Gif ID</th><th>${t('tableTitle')}</th><th>${t('tableAuthor')}</th><th>${t('tableTags')}</th>
+  <th>${t('tableViews')}</th><th>Likes</th><th>${t('tableVideo')}</th><th>${t('page')}</th><th>${t('tableDate')}</th><th>${t('tableDownload')}</th>
 </tr></thead>
 <tbody>
 ${body}
@@ -569,7 +562,7 @@ ${body}
 </table>
 <script id="rg-rows" type="application/json">${rowsJson}</script>
 <script>
-${DOWNLOAD_SCRIPT}
+${DOWNLOAD_SCRIPT(language)}
 </script>
 </body>
 </html>

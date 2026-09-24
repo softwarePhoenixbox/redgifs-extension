@@ -66,14 +66,14 @@ export default function App() {
   const [savedCount, setSavedCount] = useState(0);
   const [selection, setSelection] = useState<GridSelectionItem[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [panelEnabled, setPanelEnabled] = useState(true);
+  const [panelEnabled, setPanelEnabled] = useState(false);
   const [downloadActionEnabled, setDownloadActionEnabled] = useState(true);
   const [language, setLanguage] = useState<PopupLanguage>('en');
   const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
   useEffect(() => {
     void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage']).then(values => {
-      setPanelEnabled(values.rgPanelEnabled !== false);
+      setPanelEnabled(values.rgPanelEnabled === true);
       setDownloadActionEnabled(values.rgDownloadActionEnabled !== false);
       const savedLanguage: PopupLanguage = values.rgLanguage === 'es' ? 'es' : 'en';
       setLanguage(savedLanguage);
@@ -219,7 +219,7 @@ export default function App() {
   async function handleExport(format: ExportFormat) {
     setBusy(true);
     setStatus({ text: t('exporting'), kind: 'ok' });
-    const res = await send({ type: 'RG_EXPORT_DB', format }, language);
+    const res = await send({ type: 'RG_EXPORT_DB', format, language }, language);
     if (res.ok && res.base64 && res.filename) {
       saveBase64AsFile(res.base64, res.filename, res.mime ?? 'application/octet-stream');
       setStatus({ text: t('exported', { filename: res.filename }), kind: 'ok' });
