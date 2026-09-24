@@ -1,4 +1,5 @@
 import { buildHtml, buildXlsx } from '../utils/exporters';
+import { embedMp4Metadata } from '../utils/mp4-metadata';
 import {
   bytesToBase64,
   deleteLink,
@@ -15,6 +16,61 @@ const ID_RE = /^[\w-]+$/;
 const REDGIFS_API = 'https://api.redgifs.com/v2';
 const DOWNLOAD_ATTEMPTS = 3;
 const DOWNLOAD_BASE_DELAY_MS = 500;
+interface ChromeOffscreenApi {
+  createDocument(options: { url: string; reasons: ['BLOBS']; justification: string }): Promise<void>;
+  hasDocument?: () => Promise<boolean>;
+}
+const blobUrlsByDownloadId = new Map<number, { url: string; offscreen: boolean }>();
+let creatingOffscreenDocument: Promise<void> | null = null;
+
+function chromeOffscreenApi(): ChromeOffscreenApi | undefined {
+  return (globalThis as typeof globalThis & { chrome?: { offscreen?: ChromeOffscreenApi } }).chrome?.offscreen;
+}
+
+async function hasChromeOffscreenDocument(api: ChromeOffscreenApi): Promise<boolean> {
+  if (api.hasDocument) return api.hasDocument();
+  const serviceWorkerClients = (globalThis as typeof globalThis & {
+    clients?: { matchAll(): Promise<Array<{ url: string }>> };
+  }).clients;
+  if (!serviceWorkerClients) return false;
+  const clients = await serviceWorkerClients.matchAll();
+  const offscreenUrl = browser.runtime.getURL('/offscreen.html');
+  return clients.some(client => client.url === offscreenUrl);
+}
+
+async function ensureChromeOffscreenDocument(api: ChromeOffscreenApi): Promise<void> {
+  if (await hasChromeOffscreenDocument(api)) return;
+  creatingOffscreenDocument ??= api.createDocument({
+    url: 'offscreen.html',
+    reasons: ['BLOBS'],
+    justification: 'Preparar un MP4 con sus metadatos y crear una URL Blob para descargarlo.',
+  }).catch(async error => {
+    if (!(await hasChromeOffscreenDocument(api))) throw error;
+  }).finally(() => {
+    creatingOffscreenDocument = null;
+  });
+  await creatingOffscreenDocument;
+}
+
+function releaseBlobUrl(blob: { url: string; offscreen: boolean }): void {
+  if (blob.offscreen) {
+    void browser.runtime.sendMessage({ type: 'RG_OFFSCREEN_REVOKE_BLOB', blob_url: blob.url });
+  } else {
+    URL.revokeObjectURL(blob.url);
+  }
+}
+
+try {
+  browser.downloads.onChanged.addListener(delta => {
+    if (delta.state?.current !== 'complete' && delta.state?.current !== 'interrupted') return;
+    const blob = blobUrlsByDownloadId.get(delta.id);
+    if (!blob) return;
+    releaseBlobUrl(blob);
+    blobUrlsByDownloadId.delete(delta.id);
+  });
+} catch {
+  // WXT's build-time fake browser does not implement downloads.onChanged.
+}
 
 interface RedgifsAuthResponse { token?: string }
 interface RedgifsGifResponse {
@@ -106,6 +162,88 @@ function extensionOf(url: string): string {
   return match?.[1]?.toLowerCase() ?? 'mp4';
 }
 
+async function startVideoDownload(
+  id: string,
+  url: string,
+  metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
+): Promise<{ downloadId: number; metadataEmbedded: boolean; metadataWarning?: string }> {
+  const filename = `redgifs/${id}.${extensionOf(url)}`;
+  const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
+  if (!hasMetadata) {
+    return {
+      downloadId: await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false }),
+      metadataEmbedded: false,
+      metadataWarning: 'No se detectaron metadatos; el video se descargó sin metadatos.',
+    };
+  }
+  if (!['mp4', 'm4v'].includes(extensionOf(url))) {
+    return {
+      downloadId: await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false }),
+      metadataEmbedded: false,
+      metadataWarning: `El formato ${extensionOf(url)} no admite esta incrustación; se descargó sin metadatos.`,
+    };
+  }
+
+  let blobUrl: string | undefined;
+  let blobCreatedOffscreen = false;
+  try {
+    const offscreenApi = chromeOffscreenApi();
+    if (offscreenApi) {
+      await ensureChromeOffscreenDocument(offscreenApi);
+      const prepared = await browser.runtime.sendMessage({
+        type: 'RG_OFFSCREEN_PREPARE_BLOB',
+        url,
+        metadata,
+      });
+      if (!prepared?.ok || !prepared.blob_url) {
+        throw new Error(prepared?.error ?? 'No se pudo preparar el MP4 en Chrome');
+      }
+      blobUrl = prepared.blob_url;
+      blobCreatedOffscreen = true;
+    } else {
+      if (typeof URL.createObjectURL !== 'function') throw new Error('Este navegador no permite preparar archivos MP4');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`respuesta HTTP ${response.status}`);
+      const source = new Uint8Array(await response.arrayBuffer());
+      const tagged = embedMp4Metadata(source, metadata);
+      const taggedBuffer = new ArrayBuffer(tagged.byteLength);
+      new Uint8Array(taggedBuffer).set(tagged);
+      blobUrl = URL.createObjectURL(new Blob([taggedBuffer], { type: 'video/mp4' }));
+    }
+    if (!blobUrl) throw new Error('No se pudo crear el archivo MP4 temporal');
+    const preparedBlobUrl = blobUrl;
+    const downloadId = await downloadWithRetry({
+      url: preparedBlobUrl,
+      filename,
+      conflictAction: 'uniquify',
+      saveAs: false,
+    });
+    blobUrlsByDownloadId.set(downloadId, { url: preparedBlobUrl, offscreen: blobCreatedOffscreen });
+    // Cubre el caso de archivos pequeños que completan antes de registrar el ID.
+    try {
+      const [item] = await browser.downloads.search({ id: downloadId });
+      if (item?.state === 'complete' || item?.state === 'interrupted') {
+        releaseBlobUrl({ url: preparedBlobUrl, offscreen: blobCreatedOffscreen });
+        blobUrlsByDownloadId.delete(downloadId);
+      }
+    } catch {
+      // onChanged libera el blob URL cuando finalice la descarga.
+    }
+    return { downloadId, metadataEmbedded: true };
+  } catch (error) {
+    if (blobUrl) releaseBlobUrl({ url: blobUrl, offscreen: blobCreatedOffscreen });
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[RG Scroller] Descarga sin metadatos para ${id}:`, reason);
+    // Si el parche de metadatos falla, no bloqueamos la descarga del video original.
+    const downloadId = await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false });
+    return {
+      downloadId,
+      metadataEmbedded: false,
+      metadataWarning: `No se pudieron incrustar los metadatos (${reason}); se descargó el video sin metadatos.`,
+    };
+  }
+}
+
 async function handle(msg: RgRequest): Promise<RgResponse> {
   switch (msg.type) {
     case 'RG_RESOLVE_GIF': {
@@ -114,14 +252,14 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     }
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
-      // Se descarga desde el background: sigue aunque cierres la pestaña
-      const downloadId = await downloadWithRetry({
-        url: msg.url,
-        filename: `redgifs/${msg.id}.${extensionOf(msg.url)}`,
-        conflictAction: 'uniquify',
-        saveAs: false,
-      });
-      return { ok: true, downloadId };
+      // Descarga en el background y añade metadatos Xtra/QuickTime sin recodificar.
+      const result = await startVideoDownload(msg.id, msg.url, msg);
+      return {
+        ok: true,
+        downloadId: result.downloadId,
+        metadata_embedded: result.metadataEmbedded,
+        metadata_warning: result.metadataWarning,
+      };
     }
     case 'RG_SAVE_LINK': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
@@ -181,24 +319,26 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       const links = await listLinks();
       let queued = 0;
       let failed = 0;
+      let withoutMetadata = 0;
       for (const link of links) {
         if (!isRedgifsUrl(link.url)) {
           failed++;
           continue;
         }
         try {
-          await downloadWithRetry({
-            url: link.url,
-            filename: `redgifs/${link.gifId}.${extensionOf(link.url)}`,
-            conflictAction: 'uniquify',
-            saveAs: false,
+          const result = await startVideoDownload(link.gifId, link.url, {
+            title: link.title,
+            author: link.author,
+            tags: link.tags,
+            pageUrl: link.pageUrl,
           });
           queued++;
+          if (!result.metadataEmbedded) withoutMetadata++;
         } catch {
           failed++;
         }
       }
-      return { ok: true, queued, failed };
+      return { ok: true, queued, failed, without_metadata: withoutMetadata };
     }
     case 'RG_IMPORT_DB': {
       const { imported, updated, total } = await importDb(base64ToBytes(msg.base64));

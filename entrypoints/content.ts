@@ -350,9 +350,25 @@ export default defineContentScript({
 
       dlButton.addEventListener('click', async () => {
         dlButton.disabled = true;
-        setStatus(dlStatus, 'Enviando al background...');
-        const res = await send({ type: 'RG_DOWNLOAD', id, url });
-        if (res.ok) setStatus(dlStatus, '✔ Descarga iniciada (carpeta Descargas/redgifs)', 'ok');
+        setStatus(dlStatus, 'Descargando e incrustando metadatos…');
+        const res = await send({
+          type: 'RG_DOWNLOAD',
+          id,
+          url,
+          title: meta.title ?? undefined,
+          author: meta.author ?? undefined,
+          tags: meta.tags,
+          pageUrl: location.href,
+        });
+        if (res.ok) {
+          setStatus(
+            dlStatus,
+            res.metadata_embedded
+              ? '✔ Descarga iniciada con metadatos (Descargas/redgifs).'
+              : `⚠ ${res.metadata_warning ?? 'Descargado sin metadatos.'}`,
+            res.metadata_embedded ? 'ok' : 'error',
+          );
+        }
         else setStatus(dlStatus, `✖ ${res.error}`, 'error');
         dlButton.disabled = false;
       });

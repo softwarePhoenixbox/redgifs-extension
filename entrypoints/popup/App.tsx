@@ -177,7 +177,11 @@ export default function App() {
     setStatus({ text: `Descargando ${links.length} links...`, kind: 'ok' });
     const res = await send({ type: 'RG_DOWNLOAD_ALL' });
     if (res.ok) {
-      setStatus({ text: `✔ ${res.queued ?? 0} en cola, ${res.failed ?? 0} fallaron`, kind: 'ok' });
+      const metadataNote = res.without_metadata ? `, ${res.without_metadata} sin metadatos` : '';
+      setStatus({
+        text: `✔ ${res.queued ?? 0} en cola, ${res.failed ?? 0} fallaron${metadataNote}`,
+        kind: res.without_metadata ? 'error' : 'ok',
+      });
     } else {
       setStatus({ text: `✖ ${res.error}`, kind: 'error' });
     }

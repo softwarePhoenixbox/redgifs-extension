@@ -28,8 +28,18 @@ export interface GridSelectionItem {
 }
 
 export type RgRequest =
+  | { type: 'RG_OFFSCREEN_PREPARE_BLOB'; url: string; metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null } }
+  | { type: 'RG_OFFSCREEN_REVOKE_BLOB'; blob_url: string }
   | { type: 'RG_RESOLVE_GIF'; id: string }
-  | { type: 'RG_DOWNLOAD'; id: string; url: string }
+  | {
+      type: 'RG_DOWNLOAD';
+      id: string;
+      url: string;
+      title?: string;
+      author?: string;
+      tags?: string[];
+      pageUrl?: string;
+    }
   | {
       type: 'RG_SAVE_LINK';
       id: string;
@@ -73,7 +83,10 @@ export type RgResponse =
       gif?: { videoUrl: string; imageUrl: string }; // RG_RESOLVE_GIF
       not_found?: boolean; // RG_RESOLVE_GIF
       rate_limited?: boolean; // RG_RESOLVE_GIF
+      blob_url?: string; // Offscreen Chrome helper
       downloadId?: number; // RG_DOWNLOAD
+      metadata_embedded?: boolean; // RG_DOWNLOAD
+      metadata_warning?: string; // RG_DOWNLOAD
       inserted?: boolean; // RG_SAVE_LINK (false = el link ya estaba guardado)
       total?: number; // RG_SAVE_LINK, RG_STATS, RG_IMPORT_DB y RG_DELETE_LINK
       exists?: boolean; // RG_CHECK_LINK
@@ -85,6 +98,7 @@ export type RgResponse =
       links?: LinkRow[]; // RG_LIST_LINKS
       queued?: number; // RG_DOWNLOAD_ALL (descargas iniciadas)
       failed?: number; // RG_DOWNLOAD_ALL (links inválidos o que fallaron)
+      without_metadata?: number; // RG_DOWNLOAD_ALL (descargados sin metadatos incrustados)
       inserted_count?: number; // RG_SAVE_BULK (links nuevos)
       updated_count?: number; // RG_SAVE_BULK (links que ya existían y se actualizaron)
       enabled?: boolean; // RG_TOGGLE_GRID_SELECT / RG_GET_GRID_SELECT_STATE (estado del modo selección)
