@@ -17,6 +17,8 @@ export default defineContentScript({
     const AUTO_SAVE_MIN_VIEWS_KEY = 'rgAutoSaveMinViews';
     const PANEL_POSITION_KEY = 'rgPanelPosition';
     const PANEL_COLLAPSED_KEY = 'rgPanelCollapsed';
+    const PANEL_ENABLED_KEY = 'rgPanelEnabled';
+    const DOWNLOAD_ACTION_ENABLED_KEY = 'rgDownloadActionEnabled';
 
     // Las 4 esquinas entre las que se puede mover el panel con el botón ⇄.
     const PANEL_POSITIONS: Array<{ top?: string; bottom?: string; left?: string; right?: string }> = [
@@ -214,10 +216,15 @@ export default defineContentScript({
 
     // ---------- Estado ----------
     let currentActiveId: string | null = null;
+    let panelRetryCount = 0;
+    let panelRetryId: string | null = null;
+    let panelRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let autoSave = false;
     let autoSaveMinViews = 0;
     let panelPositionIdx = 0;
     let panelCollapsed = false;
+    let panelEnabled = true;
+    let downloadActionEnabled = true;
 
     moveBtn.addEventListener('click', () => {
       panelPositionIdx = (panelPositionIdx + 1) % PANEL_POSITIONS.length;
@@ -236,8 +243,10 @@ export default defineContentScript({
     async function send(request: RgRequest): Promise<RgResponse> {
       try {
         const res = (await browser.runtime.sendMessage(request)) as RgResponse | undefined;
-        return res ?? { ok: false, error: 'Sin respuesta del background' };
+        if (!res) console.warn(`[RG Scroller] Background no respondió a ${request.type}`);
+        return res ?? { ok: false, error: `El background no respondió (${request.type})` };
       } catch {
+        console.error(`[RG Scroller] Falló el envío del mensaje ${request.type}`);
         return { ok: false, error: 'No se pudo contactar con la extensión. Recarga la página.' };
       }
     }
@@ -249,13 +258,104 @@ export default defineContentScript({
       | { kind: 'rate_limited' }
       | { kind: 'error'; message: string };
 
-    async function getValidLink(id: string): Promise<GifLinkResult> {
-      const response = await send({ type: 'RG_RESOLVE_GIF', id });
-      if (!response.ok) return { kind: 'error', message: response.error };
-      if (response.not_found) return { kind: 'not_found' };
-      if (response.rate_limited) return { kind: 'rate_limited' };
-      if (!response.gif) return { kind: 'error', message: 'La API no devolvió la URL del video' };
-      return { kind: 'ok', ...response.gif };
+    type ResolvedGif = Extract<GifLinkResult, { kind: 'ok' }>;
+    const resolvedGifCache = new Map<string, { result: ResolvedGif; expiresAt: number }>();
+    const pendingGifResolutions = new Map<string, Promise<GifLinkResult>>();
+
+    function getValidLink(id: string): Promise<GifLinkResult> {
+      const cached = resolvedGifCache.get(id);
+      if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.result);
+      if (cached) resolvedGifCache.delete(id);
+      const pending = pendingGifResolutions.get(id);
+      if (pending) return pending;
+
+      const request = (async (): Promise<GifLinkResult> => {
+        const response = await send({ type: 'RG_RESOLVE_GIF', id });
+        if (!response.ok) return { kind: 'error', message: response.error };
+        if (response.not_found) return { kind: 'not_found' };
+        if (response.rate_limited) return { kind: 'rate_limited' };
+        if (!response.gif) return { kind: 'error', message: 'La API no devolvió la URL del video' };
+        const resolved: ResolvedGif = { kind: 'ok', ...response.gif };
+        // La URL de media puede expirar; reutilizamos la consulta compartida
+        // unos minutos para evitar dobles llamadas al hacer scroll/clic.
+        resolvedGifCache.set(id, { result: resolved, expiresAt: Date.now() + 5 * 60_000 });
+        return resolved;
+      })();
+      pendingGifResolutions.set(id, request);
+      void request.finally(() => {
+        if (pendingGifResolutions.get(id) === request) pendingGifResolutions.delete(id);
+      });
+      return request;
+    }
+
+    function removeDownloadActions(): void {
+      document.querySelectorAll('.rg-download-action').forEach(el => el.remove());
+    }
+
+    function paintDownloadAction(): void {
+      if (!downloadActionEnabled) {
+        removeDownloadActions();
+        return;
+      }
+      const heart = document.querySelector<HTMLButtonElement>('button.LikeButton');
+      const heartItem = heart?.closest<HTMLElement>('li.sideBarItem');
+      const list = heartItem?.parentElement;
+      if (!heart || !heartItem || !list) return;
+
+      let item = list.querySelector<HTMLElement>(':scope > .rg-download-action');
+      if (!item) {
+        item = document.createElement('li');
+        item.className = `${heartItem.className} rg-download-action`;
+        const button = document.createElement('button');
+        button.className = `${heart.className.replace(/\bLikeButton\b/g, '').trim()} rg-download-button`;
+        button.type = 'button';
+        button.title = 'Descargar video con metadatos';
+        button.setAttribute('aria-label', 'Descargar video');
+        button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+        button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = 'Descargar';
+        label.style.cssText = 'font-size:12px;color:#fff;';
+        button.appendChild(label);
+        item.appendChild(button);
+        button.addEventListener('click', async event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const active = getActiveItem();
+          // Preferimos resolver el elemento visible ahora. El sitio reemplaza
+          // la barra lateral al hacer scroll y un nodo recién pintado puede
+          // conservar brevemente el identificador del video anterior.
+          const id = active?.id || item?.dataset.gifId;
+          if (!id) return;
+          button.disabled = true;
+          label.textContent = 'Preparando…';
+          try {
+            const result = await getValidLink(id);
+            if (result.kind !== 'ok') throw new Error(result.kind === 'error' ? result.message : 'No se pudo resolver el video');
+            const domMeta = scrapeMeta(active?.root ?? document.body);
+            const apiMeta = result.metadata;
+            const download = await send({
+              type: 'RG_DOWNLOAD', id, url: result.videoUrl,
+              title: domMeta.title ?? apiMeta?.title ?? undefined,
+              author: domMeta.author ?? apiMeta?.author ?? undefined,
+              tags: domMeta.tags.length ? domMeta.tags : (apiMeta?.tags ?? []),
+              pageUrl: location.href,
+            });
+            if (!download.ok) throw new Error(download.error);
+            label.textContent = 'Descargado';
+            showToast('✔ Descarga iniciada con metadatos', 'ok');
+          } catch (error) {
+            label.textContent = 'Error';
+            showToast(`✖ ${error instanceof Error ? error.message : 'No se pudo descargar'}`, 'error');
+          }
+          setTimeout(() => { if (label.isConnected) label.textContent = 'Descargar'; button.disabled = false; }, 2500);
+        });
+      }
+      const active = getActiveItem();
+      if (active?.id) item.dataset.gifId = active.id;
+      const next = heartItem.nextElementSibling;
+      if (next !== item) list.insertBefore(item, next);
     }
 
     function fileToBase64(file: File): Promise<string> {
@@ -859,18 +959,9 @@ export default defineContentScript({
     //     cercano al centro vertical de la pantalla (best-effort: si el
     //     markup cambia, esto sigue detectando el video en lugar de fallar).
     function getActiveItem(): { id: string; root: HTMLElement | null } | null {
-      // 1) Feed de scroll infinito (incluye el de videos relacionados que
-      // aparece debajo del video principal en /watch/<id>): esto es lo más
-      // confiable y va PRIMERO, porque en /watch/<id> la URL no cambia
-      // aunque sigas scrolleando a otros videos.
-      const active = document.querySelector<HTMLElement>(ACTIVE_ITEM_SELECTOR);
-      if (active) {
-        const id = active.getAttribute('data-feed-item-id');
-        if (id) return { id, root: active };
-      }
-
-      // 2) Sin clase "activa" (perfiles/grillas): el item con
-      // data-feed-item-id más cercano al centro vertical de la pantalla.
+      // Al desplazarse por el feed, RedGifs a veces deja la clase "activa"
+      // en el tile anterior. Usamos primero el video visible más cercano al
+      // centro y dejamos esa clase como respaldo.
       const items = Array.from(document.querySelectorAll<HTMLElement>('[data-feed-item-id]'));
       if (items.length) {
         const viewportCenter = window.innerHeight / 2;
@@ -886,7 +977,11 @@ export default defineContentScript({
         if (best) return { id: best.id, root: best.el };
       }
 
-      // 3) Último fallback: id de la URL /watch/<id>. Solo se usa cuando no
+      const active = document.querySelector<HTMLElement>(ACTIVE_ITEM_SELECTOR);
+      const activeId = active?.getAttribute('data-feed-item-id');
+      if (active && activeId) return { id: activeId, root: active };
+
+      // Último fallback: id de la URL /watch/<id>. Solo se usa cuando no
       // hay NADA detectable en el DOM (ej. la página cargó sin feed de
       // relacionados todavía, o el markup cambió por completo).
       const watchMatch = WATCH_PATH_RE.exec(location.pathname);
@@ -906,6 +1001,14 @@ export default defineContentScript({
 
       // SOLO ACTUALIZAR SI EL VIDEO ES DISTINTO AL QUE YA TENEMOS
       if (!id || id === currentActiveId || id.includes('feed-module')) return;
+      if (panelRetryTimer) {
+        clearTimeout(panelRetryTimer);
+        panelRetryTimer = null;
+      }
+      if (panelRetryId !== id) {
+        panelRetryId = id;
+        panelRetryCount = 0;
+      }
       currentActiveId = id;
 
       renderLoading(id);
@@ -915,6 +1018,8 @@ export default defineContentScript({
       if (currentActiveId !== id) return;
 
       if (result.kind === 'ok') {
+        panelRetryCount = 0;
+        panelRetryId = null;
         // Si no encontramos el item en el DOM (típico en /watch sin el
         // markup del feed), se scrapea sobre toda la página como fallback.
         const scraped = scrapeMeta(root ?? document.body);
@@ -930,6 +1035,23 @@ export default defineContentScript({
         renderResult(id, result.videoUrl, result.imageUrl, meta);
       } else {
         renderError(id, result);
+        // Si el service worker/background no respondió, no dejamos el panel
+        // clavado en ese error: reintentamos unas pocas veces. Scroll o una
+        // navegación a otro gif también vuelven a ejecutar la detección.
+        if (
+          result.kind === 'error' &&
+          /background|contactar con la extensión|sin respuesta/i.test(result.message) &&
+          panelRetryCount < 3
+        ) {
+          panelRetryCount++;
+          panelRetryTimer = setTimeout(() => {
+            panelRetryTimer = null;
+            if (currentActiveId === id) {
+              currentActiveId = null;
+              void updatePanel();
+            }
+          }, 1200 * panelRetryCount);
+        }
       }
     }
 
@@ -941,6 +1063,7 @@ export default defineContentScript({
       requestAnimationFrame(() => {
         scheduled = false;
         void updatePanel();
+        paintDownloadAction();
         if (gridSelectMode) paintGridCheckboxes(); // cubre items nuevos del scroll infinito
       });
     }
@@ -970,11 +1093,16 @@ export default defineContentScript({
         AUTO_SAVE_MIN_VIEWS_KEY,
         PANEL_POSITION_KEY,
         PANEL_COLLAPSED_KEY,
+        PANEL_ENABLED_KEY,
+        DOWNLOAD_ACTION_ENABLED_KEY,
       ]);
       autoSave = stored[AUTO_SAVE_KEY] === true;
       autoSaveMinViews = typeof stored[AUTO_SAVE_MIN_VIEWS_KEY] === 'number' ? stored[AUTO_SAVE_MIN_VIEWS_KEY] : 0;
       panelPositionIdx = typeof stored[PANEL_POSITION_KEY] === 'number' ? stored[PANEL_POSITION_KEY] : 0;
       panelCollapsed = stored[PANEL_COLLAPSED_KEY] === true;
+      panelEnabled = stored[PANEL_ENABLED_KEY] !== false;
+      downloadActionEnabled = stored[DOWNLOAD_ACTION_ENABLED_KEY] !== false;
+      panel.style.display = panelEnabled ? 'flex' : 'none';
 
       applyPanelPosition(panelPositionIdx);
       if (panelCollapsed) {
@@ -983,14 +1111,28 @@ export default defineContentScript({
       }
 
       ctx.addEventListener(window, 'scroll', scheduleUpdate, { passive: true });
+      ctx.addEventListener(document, 'scroll', scheduleUpdate, { capture: true, passive: true });
       observer.observe(document.body, {
         attributes: true,
+        childList: true,
         subtree: true,
         attributeFilter: ['class'],
       });
       patchHistoryForSpaNav(scheduleUpdate);
       scheduleUpdate();
     })();
+
+    browser.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+      if (changes[PANEL_ENABLED_KEY]) {
+        panelEnabled = changes[PANEL_ENABLED_KEY].newValue !== false;
+        panel.style.display = panelEnabled ? 'flex' : 'none';
+      }
+      if (changes[DOWNLOAD_ACTION_ENABLED_KEY]) {
+        downloadActionEnabled = changes[DOWNLOAD_ACTION_ENABLED_KEY].newValue !== false;
+        paintDownloadAction();
+      }
+    });
 
     // Limpieza si la extensión se recarga o se desinstala
     ctx.onInvalidated(() => {

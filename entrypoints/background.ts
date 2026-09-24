@@ -436,15 +436,22 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
-    // Solo mensajes de esta misma extensión
-    if (sender.id !== browser.runtime.id) return;
-
+    // runtime.onMessage solo recibe mensajes de esta extensión; no filtramos
+    // sender.id porque Chrome puede omitirlo en algunos mensajes de content script.
+    console.debug(`[RG Scroller] Background recibió ${message.type}`, {
+      senderId: sender.id ?? '(vacío)',
+      runtimeId: browser.runtime.id,
+    });
     handle(message)
-      .then(sendResponse)
+      .then(response => {
+        console.debug(`[RG Scroller] Background respondió ${message.type}: ${response.ok ? 'ok' : 'error'}`);
+        sendResponse(response);
+      })
       .catch((err: unknown) => {
-        console.error('[RG Scroller] background', err);
-        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+        console.error(`[RG Scroller] Background falló en ${message.type}`, err);
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) } satisfies RgResponse);
       });
-    return true; // respuesta asíncrona
+    // Patrón compatible con Chrome anterior a la respuesta Promise de MV3 y Firefox.
+    return true;
   });
 });

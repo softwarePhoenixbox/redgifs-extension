@@ -64,6 +64,22 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [savedCount, setSavedCount] = useState(0);
   const [selection, setSelection] = useState<GridSelectionItem[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panelEnabled, setPanelEnabled] = useState(true);
+  const [downloadActionEnabled, setDownloadActionEnabled] = useState(true);
+
+  useEffect(() => {
+    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled']).then(values => {
+      setPanelEnabled(values.rgPanelEnabled !== false);
+      setDownloadActionEnabled(values.rgDownloadActionEnabled !== false);
+    });
+  }, []);
+
+  async function updateSetting(key: 'rgPanelEnabled' | 'rgDownloadActionEnabled', enabled: boolean) {
+    if (key === 'rgPanelEnabled') setPanelEnabled(enabled);
+    else setDownloadActionEnabled(enabled);
+    await browser.storage.local.set({ [key]: enabled });
+  }
 
   // El estado de este popup se reinicia cada vez que se cierra y se vuelve
   // a abrir, pero el modo selección vive en el content script de la
@@ -225,7 +241,30 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <strong style={{ color: '#00ff00', fontSize: 14 }}>🎯 Links guardados</strong>
           <span style={{ marginLeft: 'auto', color: '#888' }}>{links.length} total</span>
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(value => !value)}
+            title="Ajustes"
+            aria-label="Ajustes"
+            aria-expanded={settingsOpen}
+            style={{ background: settingsOpen ? '#454545' : 'transparent', border: '1px solid #555', borderRadius: 5, color: '#ddd', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '4px 7px' }}
+          >
+            ⚙
+          </button>
         </div>
+        {settingsOpen && (
+          <div style={{ background: '#1c1c1c', border: '1px solid #444', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+            <strong style={{ display: 'block', color: '#ddd', marginBottom: 7 }}>Ajustes de la página</strong>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>
+              <input type="checkbox" checked={panelEnabled} onChange={e => void updateSetting('rgPanelEnabled', e.target.checked)} />
+              Mostrar “Video en Pantalla”
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>
+              <input type="checkbox" checked={downloadActionEnabled} onChange={e => void updateSetting('rgDownloadActionEnabled', e.target.checked)} />
+              Mostrar icono de descarga junto a las acciones del video
+            </label>
+          </div>
+        )}
         <button
           onClick={() => void handleToggleGridSelect()}
           style={{
