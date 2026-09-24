@@ -160,7 +160,9 @@ async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> 
 
     const data = (await response.json()) as RedgifsGifResponse;
     const urls = data.gif?.urls;
-    const videoUrl = urls?.hd ?? urls?.sd;
+    const hdVideoUrl = urls?.hd && isRedgifsUrl(urls.hd) ? urls.hd : undefined;
+    const sdVideoUrl = urls?.sd && isRedgifsUrl(urls.sd) ? urls.sd : undefined;
+    const videoUrl = hdVideoUrl ?? sdVideoUrl;
     if (!videoUrl || !isRedgifsUrl(videoUrl)) return { ok: true, not_found: true };
     const imageUrl = urls?.thumbnail ?? urls?.poster ?? videoUrl.replace(/\.[a-z0-9]+$/i, '-mobile.jpg');
     const source = data.gif;
@@ -173,6 +175,8 @@ async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> 
       ok: true,
       gif: {
         videoUrl,
+        hdVideoUrl,
+        sdVideoUrl,
         imageUrl: isRedgifsUrl(imageUrl) ? imageUrl : videoUrl,
         metadata: {
           title: title || null,
@@ -234,8 +238,10 @@ async function startVideoDownload(
   id: string,
   url: string,
   metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
+  quality?: 'hd' | 'sd' | 'image',
 ): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
-  const filename = `redgifs/${id}.${extensionOf(url)}`;
+  const suffix = quality === 'sd' || quality === 'image' ? '-mobile' : '';
+  const filename = `redgifs/${id}${suffix}.${extensionOf(url)}`;
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
     return {
@@ -334,7 +340,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
       // Descarga en el background y añade metadatos Xtra/QuickTime sin recodificar.
-      const result = await startVideoDownload(msg.id, msg.url, msg);
+      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality);
       return {
         ok: true,
         downloadId: result.downloadId,

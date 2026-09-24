@@ -68,15 +68,17 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelEnabled, setPanelEnabled] = useState(false);
   const [downloadActionEnabled, setDownloadActionEnabled] = useState(true);
+  const [downloadQuality, setDownloadQuality] = useState<'hd' | 'sd' | 'both'>('hd');
   const [language, setLanguage] = useState<PopupLanguage>('en');
   const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
   useEffect(() => {
-    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage']).then(values => {
+    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage', 'rgDownloadQuality']).then(values => {
       setPanelEnabled(values.rgPanelEnabled === true);
       setDownloadActionEnabled(values.rgDownloadActionEnabled !== false);
       const savedLanguage: PopupLanguage = values.rgLanguage === 'es' ? 'es' : 'en';
       setLanguage(savedLanguage);
+      setDownloadQuality(values.rgDownloadQuality === 'sd' || values.rgDownloadQuality === 'both' ? values.rgDownloadQuality : 'hd');
       document.documentElement.lang = savedLanguage;
     });
   }, []);
@@ -91,6 +93,11 @@ export default function App() {
     if (key === 'rgPanelEnabled') setPanelEnabled(enabled);
     else setDownloadActionEnabled(enabled);
     await browser.storage.local.set({ [key]: enabled });
+  }
+
+  async function updateDownloadQuality(value: 'hd' | 'sd' | 'both') {
+    setDownloadQuality(value);
+    await browser.storage.local.set({ rgDownloadQuality: value });
   }
 
   // El estado de este popup se reinicia cada vez que se cierra y se vuelve
@@ -272,6 +279,14 @@ export default function App() {
               <select value={language} onChange={e => void updateLanguage(e.target.value as PopupLanguage)} style={{ marginLeft: 'auto', background: '#292929', color: '#eee', border: '1px solid #555', borderRadius: 4, padding: '3px 6px' }}>
                 <option value="en">{t('languageEnglish')}</option>
                 <option value="es">{t('languageSpanish')}</option>
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0' }}>
+              {t('downloadQuality')}
+              <select value={downloadQuality} onChange={e => void updateDownloadQuality(e.target.value as 'hd' | 'sd' | 'both')} style={{ marginLeft: 'auto', background: '#292929', color: '#eee', border: '1px solid #555', borderRadius: 4, padding: '3px 6px' }}>
+                <option value="hd">{t('qualityHd')}</option>
+                <option value="sd">{t('qualitySd')}</option>
+                <option value="both">{t('qualityBoth')}</option>
               </select>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>

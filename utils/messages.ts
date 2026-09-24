@@ -39,6 +39,7 @@ export type RgRequest =
       author?: string;
       tags?: string[];
       pageUrl?: string;
+      quality?: 'hd' | 'sd' | 'image';
     }
   | {
       type: 'RG_SAVE_LINK';
@@ -82,6 +83,8 @@ export type RgResponse =
       ok: true;
       gif?: {
         videoUrl: string;
+        hdVideoUrl?: string;
+        sdVideoUrl?: string;
         imageUrl: string;
         metadata?: { title: string | null; author: string | null; tags: string[] };
       }; // RG_RESOLVE_GIF

@@ -34,6 +34,7 @@ const messages = {
     tableVideo: 'Video', tableDate: 'Date', tableDownload: 'Download', metadataButton: '⬇ With metadata',
     metadataInstructions: '“With metadata” embeds title, author, and tags in the MP4. To populate the URL column, download the shortcut as .url.txt and rename it to .url; Chrome protects direct .url downloads.',
     saving: 'Saving…', savingDatabase: 'Saving to the database…', selectedCount: '{count} selected', importCounts: '✔ {imported} new, {updated} updated',
+    downloadQuality: 'Download quality', qualityHd: 'HD', qualitySd: 'SD', qualityBoth: 'Both (choose each time)', downloadHd: 'Download HD', downloadSd: 'Download SD', downloadImage: 'Download JPG image', redditDownload: 'Download', redditImage: 'JPG image', redditAuthor: 'Posted by', imageDownloadStarted: 'JPG image download started',
   },
   es: {
     savedLinks: 'Links guardados', total: '{count} total', settings: 'Ajustes', pageSettings: 'Ajustes de la página', language: 'Idioma',
@@ -68,6 +69,7 @@ const messages = {
     tableVideo: 'Video', tableDate: 'Fecha', tableDownload: 'Descargar', metadataButton: '⬇ Con metadatos',
     metadataInstructions: '“Con metadatos” incrusta título, autor y tags en el MP4. Para la columna URL, descarga el acceso como .url.txt y renómbralo a .url; Chrome protege las descargas .url directas.',
     saving: 'Guardando…', savingDatabase: 'Guardando en la base…', selectedCount: '{count} seleccionados', importCounts: '✔ {imported} nuevos, {updated} actualizados',
+    downloadQuality: 'Calidad de descarga', qualityHd: 'HD', qualitySd: 'SD', qualityBoth: 'Ambos (elegir cada vez)', downloadHd: 'Descargar HD', downloadSd: 'Descargar SD', downloadImage: 'Descargar imagen JPG', redditDownload: 'Descargar', redditImage: 'Imagen JPG', redditAuthor: 'Publicado por', imageDownloadStarted: 'Descarga de imagen JPG iniciada',
   },
 } as const;
 
