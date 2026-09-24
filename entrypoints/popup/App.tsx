@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LinkRow } from '../../utils/links-db';
 import type { ExportFormat, GridSelectionItem, RgRequest, RgResponse } from '../../utils/messages';
+import { popupMessage, type PopupLanguage } from '../../utils/popup-i18n';
 
-async function send(request: RgRequest): Promise<RgResponse> {
+async function send(request: RgRequest, language: PopupLanguage): Promise<RgResponse> {
   try {
     const res = (await browser.runtime.sendMessage(request)) as RgResponse | undefined;
-    return res ?? { ok: false, error: 'Sin respuesta del background' };
+    return res ?? { ok: false, error: popupMessage(language, 'backgroundError') };
   } catch {
-    return { ok: false, error: 'No se pudo contactar con la extensión' };
+    return { ok: false, error: popupMessage(language, 'extensionError') };
   }
 }
 
@@ -15,14 +16,14 @@ async function send(request: RgRequest): Promise<RgResponse> {
 // pestaña activa (no con el background). Se usa para el modo selección
 // múltiple en grillas: solo tiene sentido en la pestaña que el usuario está
 // mirando ahora mismo.
-async function sendToActiveTab(request: RgRequest): Promise<RgResponse> {
+async function sendToActiveTab(request: RgRequest, language: PopupLanguage): Promise<RgResponse> {
   try {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return { ok: false, error: 'No se encontró la pestaña activa' };
+    if (!tab?.id) return { ok: false, error: popupMessage(language, 'activeTabError') };
     const res = (await browser.tabs.sendMessage(tab.id, request)) as RgResponse | undefined;
-    return res ?? { ok: false, error: 'Sin respuesta de la página' };
+    return res ?? { ok: false, error: popupMessage(language, 'pageError') };
   } catch {
-    return { ok: false, error: 'Abrí una página de redgifs.com para usar esto' };
+    return { ok: false, error: popupMessage(language, 'redgifsError') };
   }
 }
 
@@ -67,13 +68,24 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelEnabled, setPanelEnabled] = useState(true);
   const [downloadActionEnabled, setDownloadActionEnabled] = useState(true);
+  const [language, setLanguage] = useState<PopupLanguage>('en');
+  const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
   useEffect(() => {
-    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled']).then(values => {
+    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage']).then(values => {
       setPanelEnabled(values.rgPanelEnabled !== false);
       setDownloadActionEnabled(values.rgDownloadActionEnabled !== false);
+      const savedLanguage: PopupLanguage = values.rgLanguage === 'es' ? 'es' : 'en';
+      setLanguage(savedLanguage);
+      document.documentElement.lang = savedLanguage;
     });
   }, []);
+
+  async function updateLanguage(next: PopupLanguage) {
+    setLanguage(next);
+    document.documentElement.lang = next;
+    await browser.storage.local.set({ rgLanguage: next });
+  }
 
   async function updateSetting(key: 'rgPanelEnabled' | 'rgDownloadActionEnabled', enabled: boolean) {
     if (key === 'rgPanelEnabled') setPanelEnabled(enabled);
@@ -87,14 +99,14 @@ export default function App() {
   // realidad ya estaba activo, y el usuario no se enteraba de lo que ya
   // había tildado en la grilla.
   async function syncGridSelectState() {
-    const res = await sendToActiveTab({ type: 'RG_GET_GRID_SELECT_STATE' });
+    const res = await sendToActiveTab({ type: 'RG_GET_GRID_SELECT_STATE' }, language);
     if (res.ok) {
       setGridSelectMode(res.enabled ?? false);
       setSelectedCount(res.selected_count ?? 0);
       setPendingCount(res.pending_count ?? res.selected_count ?? 0);
       setSavedCount(res.saved_count ?? 0);
       if (res.enabled && (res.selected_count ?? 0) > 0) {
-        const list = await sendToActiveTab({ type: 'RG_LIST_GRID_SELECTION' });
+        const list = await sendToActiveTab({ type: 'RG_LIST_GRID_SELECTION' }, language);
         if (list.ok) setSelection(list.selection ?? []);
       } else {
         setSelection([]);
@@ -106,7 +118,7 @@ export default function App() {
   }
 
   async function handleDeselectItem(id: string) {
-    const res = await sendToActiveTab({ type: 'RG_DESELECT_GRID_ITEM', id });
+    const res = await sendToActiveTab({ type: 'RG_DESELECT_GRID_ITEM', id }, language);
     if (res.ok) {
       setSelectedCount(res.selected_count ?? 0);
       setSelection(prev => prev.filter(item => item.id !== id));
@@ -115,7 +127,7 @@ export default function App() {
 
   async function handleToggleGridSelect() {
     const next = !gridSelectMode;
-    const res = await sendToActiveTab({ type: 'RG_TOGGLE_GRID_SELECT', enabled: next });
+    const res = await sendToActiveTab({ type: 'RG_TOGGLE_GRID_SELECT', enabled: next }, language);
     if (res.ok) {
       const enabled = res.enabled ?? next;
       setGridSelectMode(enabled);
@@ -123,27 +135,27 @@ export default function App() {
       setPendingCount(res.pending_count ?? res.selected_count ?? 0);
       setSavedCount(res.saved_count ?? 0);
       if (enabled && (res.selected_count ?? 0) > 0) {
-        const list = await sendToActiveTab({ type: 'RG_LIST_GRID_SELECTION' });
+        const list = await sendToActiveTab({ type: 'RG_LIST_GRID_SELECTION' }, language);
         if (list.ok) setSelection(list.selection ?? []);
       } else {
         setSelection([]);
       }
       setStatus({
         text: enabled
-          ? '🔲 Selección activada: tocá los gifs en la página y guardalos desde ahí'
-          : 'Selección desactivada',
+          ? t('selectionStarted')
+          : t('selectionStopped'),
         kind: 'ok',
       });
     } else {
-      setStatus({ text: `✖ ${res.error}`, kind: 'error' });
+      setStatus({ text: t('selectionError', { error: res.error }), kind: 'error' });
     }
   }
 
   async function loadLinks() {
     setBusy(true);
-    const res = await send({ type: 'RG_LIST_LINKS' });
+    const res = await send({ type: 'RG_LIST_LINKS' }, language);
     if (res.ok && res.links) setLinks([...res.links].reverse()); // más nuevos primero
-    else setStatus({ text: res.ok ? 'No se pudo leer la lista' : res.error, kind: 'error' });
+    else setStatus({ text: res.ok ? t('listError') : res.error, kind: 'error' });
     setBusy(false);
   }
 
@@ -166,7 +178,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
     };
-  }, []);
+  }, [language]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -178,59 +190,59 @@ export default function App() {
 
   async function handleDelete(gifId: string) {
     setBusy(true);
-    const res = await send({ type: 'RG_DELETE_LINK', id: gifId });
+    const res = await send({ type: 'RG_DELETE_LINK', id: gifId }, language);
     if (res.ok) {
       setLinks(prev => prev.filter(l => l.gifId !== gifId));
-      setStatus({ text: '✔ Link borrado', kind: 'ok' });
+      setStatus({ text: t('deleted'), kind: 'ok' });
     } else {
-      setStatus({ text: `✖ ${res.error}`, kind: 'error' });
+      setStatus({ text: t('selectionError', { error: res.error }), kind: 'error' });
     }
     setBusy(false);
   }
 
   async function handleDownloadAll() {
     setBusy(true);
-    setStatus({ text: `Descargando ${links.length} links...`, kind: 'ok' });
-    const res = await send({ type: 'RG_DOWNLOAD_ALL' });
+    setStatus({ text: t('downloadStarting', { count: links.length }), kind: 'ok' });
+    const res = await send({ type: 'RG_DOWNLOAD_ALL' }, language);
     if (res.ok) {
-      const metadataNote = res.without_metadata ? `, ${res.without_metadata} sin metadatos` : '';
+      const metadataNote = res.without_metadata ? t('noMetadata', { count: res.without_metadata }) : '';
       setStatus({
-        text: `✔ ${res.queued ?? 0} en cola, ${res.failed ?? 0} fallaron${metadataNote}`,
+        text: t('downloadResult', { queued: res.queued ?? 0, failed: res.failed ?? 0, metadata: metadataNote }),
         kind: res.without_metadata ? 'error' : 'ok',
       });
     } else {
-      setStatus({ text: `✖ ${res.error}`, kind: 'error' });
+      setStatus({ text: t('selectionError', { error: res.error }), kind: 'error' });
     }
     setBusy(false);
   }
 
   async function handleExport(format: ExportFormat) {
     setBusy(true);
-    setStatus({ text: 'Exportando...', kind: 'ok' });
-    const res = await send({ type: 'RG_EXPORT_DB', format });
+    setStatus({ text: t('exporting'), kind: 'ok' });
+    const res = await send({ type: 'RG_EXPORT_DB', format }, language);
     if (res.ok && res.base64 && res.filename) {
       saveBase64AsFile(res.base64, res.filename, res.mime ?? 'application/octet-stream');
-      setStatus({ text: `✔ Exportado: ${res.filename}`, kind: 'ok' });
+      setStatus({ text: t('exported', { filename: res.filename }), kind: 'ok' });
     } else if (!res.ok) {
-      setStatus({ text: `✖ ${res.error}`, kind: 'error' });
+      setStatus({ text: t('selectionError', { error: res.error }), kind: 'error' });
     }
     setBusy(false);
   }
 
   async function handleImport(file: File) {
     setBusy(true);
-    setStatus({ text: 'Importando y fusionando...', kind: 'ok' });
+    setStatus({ text: t('importing'), kind: 'ok' });
     try {
       const base64 = await fileToBase64(file);
-      const res = await send({ type: 'RG_IMPORT_DB', base64 });
+      const res = await send({ type: 'RG_IMPORT_DB', base64 }, language);
       if (res.ok) {
-        setStatus({ text: `✔ ${res.imported ?? 0} nuevos, ${res.updated ?? 0} actualizados`, kind: 'ok' });
+        setStatus({ text: t('importResult', { imported: res.imported ?? 0, updated: res.updated ?? 0 }), kind: 'ok' });
         await loadLinks();
       } else {
-        setStatus({ text: `✖ ${res.error}`, kind: 'error' });
+        setStatus({ text: t('selectionError', { error: res.error }), kind: 'error' });
       }
     } catch {
-      setStatus({ text: '✖ No se pudo leer el archivo', kind: 'error' });
+      setStatus({ text: t('readFileError'), kind: 'error' });
     }
     setBusy(false);
   }
@@ -239,13 +251,13 @@ export default function App() {
     <div style={{ width: 420, maxHeight: 560, display: 'flex', flexDirection: 'column', fontSize: 12 }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid #333' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <strong style={{ color: '#00ff00', fontSize: 14 }}>🎯 Links guardados</strong>
-          <span style={{ marginLeft: 'auto', color: '#888' }}>{links.length} total</span>
+          <strong style={{ color: '#00ff00', fontSize: 14 }}>🎯 {t('savedLinks')}</strong>
+          <span style={{ marginLeft: 'auto', color: '#888' }}>{t('total', { count: links.length })}</span>
           <button
             type="button"
             onClick={() => setSettingsOpen(value => !value)}
-            title="Ajustes"
-            aria-label="Ajustes"
+            title={t('settings')}
+            aria-label={t('settings')}
             aria-expanded={settingsOpen}
             style={{ background: settingsOpen ? '#454545' : 'transparent', border: '1px solid #555', borderRadius: 5, color: '#ddd', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '4px 7px' }}
           >
@@ -254,14 +266,21 @@ export default function App() {
         </div>
         {settingsOpen && (
           <div style={{ background: '#1c1c1c', border: '1px solid #444', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
-            <strong style={{ display: 'block', color: '#ddd', marginBottom: 7 }}>Ajustes de la página</strong>
+            <strong style={{ display: 'block', color: '#ddd', marginBottom: 7 }}>{t('pageSettings')}</strong>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0' }}>
+              {t('language')}
+              <select value={language} onChange={e => void updateLanguage(e.target.value as PopupLanguage)} style={{ marginLeft: 'auto', background: '#292929', color: '#eee', border: '1px solid #555', borderRadius: 4, padding: '3px 6px' }}>
+                <option value="en">{t('languageEnglish')}</option>
+                <option value="es">{t('languageSpanish')}</option>
+              </select>
+            </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>
               <input type="checkbox" checked={panelEnabled} onChange={e => void updateSetting('rgPanelEnabled', e.target.checked)} />
-              Mostrar “Video en Pantalla”
+              {t('showPanel')}
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>
               <input type="checkbox" checked={downloadActionEnabled} onChange={e => void updateSetting('rgDownloadActionEnabled', e.target.checked)} />
-              Mostrar icono de descarga junto a las acciones del video
+              {t('showDownloadAction')}
             </label>
           </div>
         )}
@@ -282,10 +301,10 @@ export default function App() {
           }}
         >
           {gridSelectMode
-            ? savedCount > 0
-              ? `🔲 ${pendingCount} pendientes · ${savedCount} guardados 💾`
-              : `🔲 Selección ACTIVA (${pendingCount}) — tocá para desactivar`
-            : '🔲 Seleccionar en la página (tags/usuarios)'}
+              ? savedCount > 0
+              ? t('selectPendingSaved', { pending: pendingCount, saved: savedCount })
+              : t('selectActive', { count: pendingCount })
+            : t('selectPage')}
         </button>
         {gridSelectMode && selection.length > 0 && (
           <div
@@ -325,7 +344,7 @@ export default function App() {
                 </span>
                 <button
                   onClick={() => void handleDeselectItem(item.id)}
-                  title="Quitar de la selección"
+                  title={t('deselect')}
                   style={{
                     background: 'transparent',
                     border: 'none',
@@ -344,7 +363,7 @@ export default function App() {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Buscar por título, autor o tag..."
+          placeholder={t('search')}
           style={{
             width: '100%',
             boxSizing: 'border-box',
@@ -362,7 +381,7 @@ export default function App() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
         {filtered.length === 0 && (
           <p style={{ color: '#888', textAlign: 'center', marginTop: 24 }}>
-            {links.length === 0 ? 'Todavía no guardaste ningún link.' : 'Sin resultados para esa búsqueda.'}
+            {links.length === 0 ? t('empty') : t('noResults')}
           </p>
         )}
         {filtered.map(link => (
@@ -415,7 +434,7 @@ export default function App() {
             </div>
             <div style={{ color: '#888' }}>
               {link.author ? `@${link.author} · ` : ''}
-              {new Date(link.createdAt).toLocaleDateString()}
+              {new Date(link.createdAt).toLocaleDateString(language === 'es' ? 'es' : 'en')}
             </div>
             {link.tags.length > 0 && (
               <div style={{ color: '#9fd3ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -438,7 +457,7 @@ export default function App() {
                   textDecoration: 'none',
                 }}
               >
-                ▶ Ver
+                {t('view')}
               </a>
               {link.pageUrl && (
                 <a
@@ -455,7 +474,7 @@ export default function App() {
                     textDecoration: 'none',
                   }}
                 >
-                  Página
+                  {t('page')}
                 </a>
               )}
               <button
@@ -472,7 +491,7 @@ export default function App() {
                   fontFamily: 'inherit',
                 }}
               >
-                🗑 Borrar
+                {t('delete')}
               </button>
             </div>
           </div>
@@ -489,14 +508,14 @@ export default function App() {
             disabled={busy}
             style={{ flex: 1, background: '#3a3a3a', color: '#ddd', border: '1px solid #555', borderRadius: 4, padding: '6px 0', cursor: 'pointer', fontFamily: 'inherit' }}
           >
-            ↻ Actualizar
+            {t('refresh')}
           </button>
           <button
             onClick={() => void handleDownloadAll()}
             disabled={busy || links.length === 0}
             style={{ flex: 1, background: '#2f6bff', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 0', cursor: 'pointer', fontFamily: 'inherit' }}
           >
-            ⬇ Descargar todo
+            {t('downloadAll')}
           </button>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -524,7 +543,7 @@ export default function App() {
             cursor: 'pointer',
           }}
         >
-          📥 Importar DB (fusionar, sin duplicar)
+          {t('importDb')}
           <input
             type="file"
             accept=".sqlite,.db"

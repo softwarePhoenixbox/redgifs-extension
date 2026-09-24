@@ -3,8 +3,8 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'Mi Extension',
-    version: '0.1.2',
+    name: 'RedGifs Extension',
+    version: '0.1.4',
     permissions: ['activeTab', 'storage', 'downloads'],
     host_permissions: ['https://api.redgifs.com/*', 'https://media.redgifs.com/*'],
     browser_specific_settings: {

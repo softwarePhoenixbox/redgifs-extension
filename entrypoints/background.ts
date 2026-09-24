@@ -113,29 +113,50 @@ interface RedgifsGifResponse {
 let redgifsToken = '';
 
 async function refreshRedgifsToken(): Promise<string> {
-  const response = await fetch(`${REDGIFS_API}/auth/temporary`);
-  if (!response.ok) throw new Error(`RedGifs auth respondió ${response.status}`);
+  const endpoint = '/auth/temporary';
+  const response = await fetch(`${REDGIFS_API}${endpoint}`, {
+    headers: { Accept: 'application/json' },
+    referrer: 'https://www.redgifs.com/',
+    referrerPolicy: 'strict-origin-when-cross-origin',
+  });
+  if (!response.ok) throw new Error(await redgifsHttpError(response, `GET ${endpoint}`));
   const data = (await response.json()) as RedgifsAuthResponse;
   if (!data.token) throw new Error('RedGifs no devolvió token de acceso');
   redgifsToken = data.token;
   return redgifsToken;
 }
 
+async function redgifsHttpError(response: Response, endpoint: string): Promise<string> {
+  const body = (await response.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 220);
+  return `RedGifs respondió HTTP ${response.status} a ${endpoint}${body ? `: ${body}` : ''}`;
+}
+
 async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> {
   try {
     if (!redgifsToken) await refreshRedgifsToken();
-    let response = await fetch(`${REDGIFS_API}/gifs/${encodeURIComponent(id)}`, {
-      headers: { Authorization: `Bearer ${redgifsToken}` },
-    });
+    const endpoint = `/gifs/${encodeURIComponent(id)}?views=yes`;
+    const requestInit: RequestInit = {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${redgifsToken}`,
+        'X-CustomHeader': `https://www.redgifs.com/watch/${encodeURIComponent(id)}`,
+      },
+      referrer: 'https://www.redgifs.com/',
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    };
+    let response = await fetch(`${REDGIFS_API}${endpoint}`, requestInit);
     if (response.status === 401 && retry) {
       redgifsToken = await refreshRedgifsToken();
-      response = await fetch(`${REDGIFS_API}/gifs/${encodeURIComponent(id)}`, {
-        headers: { Authorization: `Bearer ${redgifsToken}` },
-      });
+      requestInit.headers = {
+        ...(requestInit.headers as Record<string, string>),
+        Authorization: `Bearer ${redgifsToken}`,
+      };
+      response = await fetch(`${REDGIFS_API}${endpoint}`, requestInit);
     }
     if (response.status === 404) return { ok: true, not_found: true };
     if (response.status === 429) return { ok: true, rate_limited: true };
-    if (!response.ok) return { ok: false, error: `Error ${response.status} al consultar la API de RedGifs` };
+    if (!response.ok) return { ok: false, error: await redgifsHttpError(response, `GET ${endpoint}`) };
 
     const data = (await response.json()) as RedgifsGifResponse;
     const urls = data.gif?.urls;
