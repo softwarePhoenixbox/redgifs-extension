@@ -1,7 +1,7 @@
 import { defineConfig } from 'wxt';
 
 export default defineConfig({
-  modules: ['@wxt-dev/module-react'],
+  modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
   manifest: {
     name: 'RedGifs Extension',
     version: '0.1.4',
