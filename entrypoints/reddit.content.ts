@@ -2,10 +2,11 @@ import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
 import type { RgRequest, RgResponse } from '../utils/messages';
 
 export default defineContentScript({
-  matches: ['*://*.reddit.com/*'],
+  matches: ['*://reddit.com/*', '*://*.reddit.com/*'],
   main(ctx) {
     const PANEL_CLASS = 'rg-reddit-download-tools';
     const MEDIA_ID_RE = /media\.redgifs\.com\/([a-z\d]+)(?:-mobile|-silent)?\.(?:jpg|jpeg|mp4)(?:[?#]|$)/i;
+    const WATCH_ID_RE = /redgifs\.com\/(?:watch|ifr)\/([a-z\d]+)/i;
     let language: PopupLanguage = 'en';
     let qualityMode: 'hd' | 'sd' | 'both' = 'hd';
     const t = (key: Parameters<typeof popupMessage>[1]) => popupMessage(language, key);
@@ -33,7 +34,13 @@ export default defineContentScript({
       for (const url of collectMediaUrls(root)) {
         const match = MEDIA_ID_RE.exec(url);
         if (match?.[1]) return match[1];
+        const watchMatch = WATCH_ID_RE.exec(url);
+        if (watchMatch?.[1]) return watchMatch[1];
       }
+      // Reddit often renders a RedGifs post as a watch-page link rather than
+      // exposing the underlying media.redgifs.com URL in the player DOM.
+      const textMatch = WATCH_ID_RE.exec(root.innerText || root.textContent || '');
+      if (textMatch?.[1]) return textMatch[1];
       return null;
     }
 
@@ -87,11 +94,17 @@ export default defineContentScript({
       setTimeout(() => element.remove(), 3000);
     }
 
-    function createButton(text: string, color: string): HTMLButtonElement {
+    function createDownloadButton(): HTMLButtonElement {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = text;
-      button.style.cssText = `background:${color};color:white;padding:5px 9px;border:0;text-decoration:none;font:bold 11px Arial,sans-serif;border-radius:4px;box-shadow:0 2px 4px #0008;min-width:70px;cursor:pointer;`;
+      button.className = 'rg-reddit-download-button';
+      button.title = t('downloadWithMetadata');
+      button.setAttribute('aria-label', t('downloadVideo'));
+      button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font:12px Arial,sans-serif;text-shadow:0 1px 3px #000;';
+      button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
+      const label = document.createElement('span');
+      label.textContent = t('download');
+      button.appendChild(label);
       return button;
     }
 
@@ -111,57 +124,38 @@ export default defineContentScript({
 
       const tools = document.createElement('div');
       tools.className = PANEL_CLASS;
-      tools.style.cssText = 'position:absolute;top:12px;right:12px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;z-index:2147483646;';
-      if (author) {
-        const authorBadge = document.createElement('div');
-        authorBadge.textContent = `👤 @${author}`;
-        authorBadge.style.cssText = 'background:#8e44ad;color:white;padding:5px 9px;border-radius:4px;font:bold 11px Arial,sans-serif;box-shadow:0 2px 4px #0008;';
-        tools.appendChild(authorBadge);
-      }
+      tools.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);z-index:2147483646;';
 
-      const download = createButton(`⬇ ${t('redditDownload')}`, '#ff4500');
-      download.title = t('downloadQuality');
+      const download = createDownloadButton();
       download.addEventListener('click', () => {
         const run = (quality: 'hd' | 'sd') => {
           const url = `https://media.redgifs.com/${id}${quality === 'sd' ? '-mobile' : ''}.mp4`;
           download.disabled = true;
+          const label = download.querySelector('span');
+          if (label) label.textContent = t('preparing');
           void send({ type: 'RG_DOWNLOAD', id, url, quality, title: title ?? undefined, author: author ?? undefined, pageUrl })
             .then(result => {
               if (!result.ok) throw new Error(result.error);
               toast(result.metadata_embedded ? t('downloadStartedMetadata') : (result.metadata_warning ?? t('downloadedWithoutMetadata')), !result.metadata_embedded);
             })
             .catch(error => toast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, true))
-            .finally(() => { download.disabled = false; });
+            .finally(() => {
+              download.disabled = false;
+              if (label) label.textContent = t('download');
+            });
         };
         if (qualityMode === 'both') showQualityMenu(download, run);
         else run(qualityMode);
       });
       tools.appendChild(download);
-
-      const image = createButton(t('redditImage'), '#3498db');
-      image.addEventListener('click', () => {
-        const url = `https://media.redgifs.com/${id}-mobile.jpg`;
-        image.disabled = true;
-        void send({ type: 'RG_DOWNLOAD', id, url, quality: 'image', author: author ?? undefined, pageUrl })
-          .then(result => {
-            if (!result.ok) throw new Error(result.error);
-            toast(t('imageDownloadStarted'));
-          })
-          .catch(error => toast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, true))
-          .finally(() => { image.disabled = false; });
-      });
-      tools.appendChild(image);
       target.appendChild(tools);
     }
 
     function scan(): void {
-      const posts = Array.from(document.querySelectorAll<HTMLElement>('shreddit-post, [data-testid="post-container"]'));
-      if (posts.length) {
-        for (const post of posts) installOn(post);
-      } else {
-        const fallback = document.querySelector<HTMLElement>('shreddit-player')?.parentElement ?? document.body;
-        installOn(fallback);
-      }
+      // Downloads are now injected by the RedGifs content script inside its
+      // /ifr/<id> frame. Remove any stale Reddit-side overlay to avoid showing
+      // a duplicate button outside the video.
+      document.querySelectorAll<HTMLElement>(`.${PANEL_CLASS}`).forEach(element => element.remove());
     }
 
     const observer = new MutationObserver(scan);

@@ -3,6 +3,7 @@ import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
 
 export default defineContentScript({
   matches: ['*://*.redgifs.com/*'],
+  allFrames: true,
 
   main(ctx) {
     // ---------- Constantes ----------
@@ -13,7 +14,7 @@ export default defineContentScript({
     // en /watch/<id> (lee el id de la URL) y en perfiles/grillas (usa el
     // item con data-feed-item-id más cercano al centro de la pantalla).
     const ACTIVE_ITEM_SELECTOR = '.GifPreview.GifPreview_isActive[data-feed-item-id]';
-    const WATCH_PATH_RE = /\/watch\/([\w-]+)/;
+    const WATCH_PATH_RE = /\/(?:watch|ifr)\/([\w-]+)/;
     const AUTO_SAVE_KEY = 'rgAutoSave';
     const AUTO_SAVE_MIN_VIEWS_KEY = 'rgAutoSaveMinViews';
     const PANEL_POSITION_KEY = 'rgPanelPosition';
@@ -356,6 +357,7 @@ export default defineContentScript({
 
     function removeDownloadActions(): void {
       document.querySelectorAll('.rg-download-action').forEach(el => el.remove());
+      document.querySelectorAll('.rg-embed-download-action').forEach(el => el.remove());
     }
 
     function paintDownloadAction(): void {
@@ -365,6 +367,54 @@ export default defineContentScript({
       }
 
       const active = getActiveItem();
+      // Embedded RedGifs players have no LikeButton sidebar. Always use one
+      // compact action inside the player, even while its controls hydrate.
+      if (/\/ifr\//i.test(location.pathname)) {
+        document.querySelectorAll<HTMLElement>('.rg-download-action').forEach(element => element.remove());
+        const id = active?.id ?? WATCH_PATH_RE.exec(location.pathname)?.[1];
+        const player = document.querySelector<HTMLElement>('.embeddedPlayer, [class*="embeddedPlayer"]')
+          ?? document.querySelector<HTMLElement>('.routeWrapper')
+          ?? document.body;
+        if (!id || !player) return;
+        const existing = document.querySelector<HTMLElement>('.rg-embed-download-action');
+        const item = existing ?? document.createElement('div');
+        item.className = 'rg-embed-download-action';
+        item.dataset.gifId = id;
+        item.style.cssText = 'position:absolute;top:8px;right:8px;z-index:2147483646;';
+        if (getComputedStyle(player).position === 'static') player.style.position = 'relative';
+        if (!item.querySelector('.rg-download-button')) {
+          const button = document.createElement('button');
+          button.className = 'rg-download-button';
+          button.type = 'button';
+          button.title = t('downloadWithMetadata');
+          button.setAttribute('aria-label', t('downloadVideo'));
+          button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-shadow:0 1px 3px #000;';
+          button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
+          const label = document.createElement('span');
+          label.className = 'label';
+          label.textContent = t('download');
+          label.style.cssText = 'font:12px Arial,sans-serif;color:#fff;';
+          button.appendChild(label);
+          button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            requestQuality(button, quality => {
+              button.disabled = true;
+              label.textContent = t('preparing');
+              void downloadGifQuality(id, quality, null).catch(error => {
+                showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
+              }).finally(() => {
+                button.disabled = false;
+                if (label.isConnected) label.textContent = t('download');
+              });
+            });
+          });
+          item.appendChild(button);
+        }
+        if (item.parentElement !== player) player.appendChild(item);
+        return;
+      }
+
       const isVisible = (element: HTMLElement): boolean => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
