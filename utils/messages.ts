@@ -28,6 +28,7 @@ export interface GridSelectionItem {
 }
 
 export type RgRequest =
+  | { type: 'RG_RESOLVE_GIF'; id: string }
   | { type: 'RG_DOWNLOAD'; id: string; url: string }
   | {
       type: 'RG_SAVE_LINK';
@@ -69,6 +70,9 @@ export type RgRequest =
 export type RgResponse =
   | {
       ok: true;
+      gif?: { videoUrl: string; imageUrl: string }; // RG_RESOLVE_GIF
+      not_found?: boolean; // RG_RESOLVE_GIF
+      rate_limited?: boolean; // RG_RESOLVE_GIF
       downloadId?: number; // RG_DOWNLOAD
       inserted?: boolean; // RG_SAVE_LINK (false = el link ya estaba guardado)
       total?: number; // RG_SAVE_LINK, RG_STATS, RG_IMPORT_DB y RG_DELETE_LINK

@@ -12,8 +12,56 @@ import {
 import type { RgRequest, RgResponse } from '../utils/messages';
 
 const ID_RE = /^[\w-]+$/;
+const REDGIFS_API = 'https://api.redgifs.com/v2';
 const DOWNLOAD_ATTEMPTS = 3;
 const DOWNLOAD_BASE_DELAY_MS = 500;
+
+interface RedgifsAuthResponse { token?: string }
+interface RedgifsGifResponse {
+  gif?: { urls?: { hd?: string; sd?: string; thumbnail?: string; poster?: string } };
+}
+
+let redgifsToken = '';
+
+async function refreshRedgifsToken(): Promise<string> {
+  const response = await fetch(`${REDGIFS_API}/auth/temporary`);
+  if (!response.ok) throw new Error(`RedGifs auth respondió ${response.status}`);
+  const data = (await response.json()) as RedgifsAuthResponse;
+  if (!data.token) throw new Error('RedGifs no devolvió token de acceso');
+  redgifsToken = data.token;
+  return redgifsToken;
+}
+
+async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> {
+  try {
+    if (!redgifsToken) await refreshRedgifsToken();
+    let response = await fetch(`${REDGIFS_API}/gifs/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${redgifsToken}` },
+    });
+    if (response.status === 401 && retry) {
+      redgifsToken = await refreshRedgifsToken();
+      response = await fetch(`${REDGIFS_API}/gifs/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${redgifsToken}` },
+      });
+    }
+    if (response.status === 404) return { ok: true, not_found: true };
+    if (response.status === 429) return { ok: true, rate_limited: true };
+    if (!response.ok) return { ok: false, error: `Error ${response.status} al consultar la API de RedGifs` };
+
+    const data = (await response.json()) as RedgifsGifResponse;
+    const urls = data.gif?.urls;
+    const videoUrl = urls?.hd ?? urls?.sd;
+    if (!videoUrl || !isRedgifsUrl(videoUrl)) return { ok: true, not_found: true };
+    const imageUrl = urls?.thumbnail ?? urls?.poster ?? videoUrl.replace(/\.[a-z0-9]+$/i, '-mobile.jpg');
+    return {
+      ok: true,
+      gif: { videoUrl, imageUrl: isRedgifsUrl(imageUrl) ? imageUrl : videoUrl },
+    };
+  } catch (error) {
+    console.error('[RG Scroller] Error al consultar la API de RedGifs', error);
+    return { ok: false, error: 'No se pudo conectar con la API de RedGifs. Revisa tu conexión o VPN.' };
+  }
+}
 
 function base64ToBytes(base64: string): Uint8Array {
   return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
@@ -60,6 +108,10 @@ function extensionOf(url: string): string {
 
 async function handle(msg: RgRequest): Promise<RgResponse> {
   switch (msg.type) {
+    case 'RG_RESOLVE_GIF': {
+      if (!ID_RE.test(msg.id)) throw new Error('ID de RedGifs inválido');
+      return resolveRedgifsGif(msg.id);
+    }
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
       // Se descarga desde el background: sigue aunque cierres la pestaña

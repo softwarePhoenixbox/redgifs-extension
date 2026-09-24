@@ -4,23 +4,7 @@ export default defineContentScript({
   matches: ['*://*.redgifs.com/*'],
 
   main(ctx) {
-    // ---------- Tipos de la API de RedGifs ----------
-    interface AuthResponse {
-      token: string;
-    }
-    interface GifResponse {
-      gif: {
-        urls: {
-          hd?: string;
-          sd?: string;
-          thumbnail?: string; // ej.: .../Nombre-mobile.jpg
-          poster?: string;
-        };
-      };
-    }
-
     // ---------- Constantes ----------
-    const API = 'https://api.redgifs.com/v2';
     const PANEL_ID = 'rg-scroller-panel';
     const STYLE_ID = 'rg-scroller-style';
     // Selector "feliz" del feed de scroll infinito. Si RedGifs cambia el
@@ -230,7 +214,6 @@ export default defineContentScript({
 
     // ---------- Estado ----------
     let currentActiveId: string | null = null;
-    let authToken = '';
     let autoSave = false;
     let autoSaveMinViews = 0;
     let panelPositionIdx = 0;
@@ -260,49 +243,19 @@ export default defineContentScript({
     }
 
     // ---------- API de RedGifs ----------
-    async function refreshAuth(): Promise<void> {
-      try {
-        const resp = await fetch(`${API}/auth/temporary`);
-        const data = (await resp.json()) as AuthResponse;
-        authToken = data.token;
-      } catch (e) {
-        console.error('[RG Scroller] Error al obtener el token', e);
-      }
-    }
-
     type GifLinkResult =
       | { kind: 'ok'; videoUrl: string; imageUrl: string }
       | { kind: 'not_found' }
       | { kind: 'rate_limited' }
       | { kind: 'error'; message: string };
 
-    async function getValidLink(id: string, retry = true): Promise<GifLinkResult> {
-      if (!authToken) await refreshAuth();
-      try {
-        const response = await fetch(`${API}/gifs/${id}`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        // Token vencido: se renueva y se reintenta UNA sola vez
-        if (response.status === 401 && retry) {
-          await refreshAuth();
-          return getValidLink(id, false);
-        }
-        if (response.status === 404) return { kind: 'not_found' };
-        if (response.status === 429) return { kind: 'rate_limited' };
-        if (!response.ok) return { kind: 'error', message: `Error ${response.status} al consultar la API` };
-
-        const data = (await response.json()) as GifResponse;
-        const { hd, sd, thumbnail, poster } = data.gif.urls;
-        const videoUrl = hd ?? sd;
-        // Sin hd ni sd: video privado, borrado, o aún procesándose.
-        if (!videoUrl) return { kind: 'not_found' };
-        // Si la API no trae miniatura, se usa el patrón <Nombre>-mobile.jpg
-        const imageUrl = thumbnail ?? poster ?? videoUrl.replace(/\.[a-z0-9]+$/i, '-mobile.jpg');
-        return { kind: 'ok', videoUrl, imageUrl };
-      } catch (e) {
-        console.error('[RG Scroller] Error al obtener el video', e);
-        return { kind: 'error', message: 'No se pudo conectar con la API de RedGifs' };
-      }
+    async function getValidLink(id: string): Promise<GifLinkResult> {
+      const response = await send({ type: 'RG_RESOLVE_GIF', id });
+      if (!response.ok) return { kind: 'error', message: response.error };
+      if (response.not_found) return { kind: 'not_found' };
+      if (response.rate_limited) return { kind: 'rate_limited' };
+      if (!response.gif) return { kind: 'error', message: 'La API no devolvió la URL del video' };
+      return { kind: 'ok', ...response.gif };
     }
 
     function fileToBase64(file: File): Promise<string> {
@@ -1003,8 +956,6 @@ export default defineContentScript({
         content.style.display = 'none';
         collapseBtn.textContent = '+';
       }
-
-      await refreshAuth();
 
       ctx.addEventListener(window, 'scroll', scheduleUpdate, { passive: true });
       observer.observe(document.body, {
