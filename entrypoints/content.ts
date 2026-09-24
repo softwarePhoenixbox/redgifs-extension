@@ -244,7 +244,7 @@ export default defineContentScript({
 
     // ---------- API de RedGifs ----------
     type GifLinkResult =
-      | { kind: 'ok'; videoUrl: string; imageUrl: string }
+      | { kind: 'ok'; videoUrl: string; imageUrl: string; metadata?: { title: string | null; author: string | null; tags: string[] } }
       | { kind: 'not_found' }
       | { kind: 'rate_limited' }
       | { kind: 'error'; message: string };
@@ -917,7 +917,16 @@ export default defineContentScript({
       if (result.kind === 'ok') {
         // Si no encontramos el item en el DOM (típico en /watch sin el
         // markup del feed), se scrapea sobre toda la página como fallback.
-        const meta = scrapeMeta(root ?? document.body);
+        const scraped = scrapeMeta(root ?? document.body);
+        // RedGifs puede renderizar distinto en Firefox. Completa los campos
+        // ausentes con la respuesta oficial de la API, que ya resolvió el ID.
+        const apiMeta = result.metadata;
+        const meta: ScrapedMeta = {
+          ...scraped,
+          title: scraped.title ?? apiMeta?.title ?? null,
+          author: scraped.author ?? apiMeta?.author ?? null,
+          tags: scraped.tags.length ? scraped.tags : (apiMeta?.tags ?? []),
+        };
         renderResult(id, result.videoUrl, result.imageUrl, meta);
       } else {
         renderError(id, result);

@@ -80,7 +80,11 @@ export type RgRequest =
 export type RgResponse =
   | {
       ok: true;
-      gif?: { videoUrl: string; imageUrl: string }; // RG_RESOLVE_GIF
+      gif?: {
+        videoUrl: string;
+        imageUrl: string;
+        metadata?: { title: string | null; author: string | null; tags: string[] };
+      }; // RG_RESOLVE_GIF
       not_found?: boolean; // RG_RESOLVE_GIF
       rate_limited?: boolean; // RG_RESOLVE_GIF
       blob_url?: string; // Offscreen Chrome helper

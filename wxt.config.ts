@@ -4,7 +4,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'Mi Extension',
-    version: '0.0.2',
+    version: '0.0.5',
     permissions: ['activeTab', 'storage', 'downloads'],
     host_permissions: ['https://api.redgifs.com/*', 'https://media.redgifs.com/*'],
     browser_specific_settings: {

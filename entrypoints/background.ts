@@ -21,6 +21,7 @@ interface ChromeOffscreenApi {
   hasDocument?: () => Promise<boolean>;
 }
 const blobUrlsByDownloadId = new Map<number, { url: string; offscreen: boolean }>();
+const pendingAnchorBlobUrls = new Set<string>();
 let creatingOffscreenDocument: Promise<void> | null = null;
 
 function chromeOffscreenApi(): ChromeOffscreenApi | undefined {
@@ -60,6 +61,32 @@ function releaseBlobUrl(blob: { url: string; offscreen: boolean }): void {
   }
 }
 
+function triggerAnchorDownload(blobUrl: string, filename: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const anchor = document.createElement('a');
+  anchor.href = blobUrl;
+  anchor.download = filename.split('/').pop() ?? filename;
+  anchor.style.display = 'none';
+  (document.body ?? document.documentElement).appendChild(anchor);
+  pendingAnchorBlobUrls.add(blobUrl);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => {
+    if (!pendingAnchorBlobUrls.delete(blobUrl)) return;
+    URL.revokeObjectURL(blobUrl);
+  }, 15 * 60 * 1000);
+  return true;
+}
+
+try {
+  browser.downloads.onCreated.addListener(item => {
+    if (!pendingAnchorBlobUrls.delete(item.url)) return;
+    blobUrlsByDownloadId.set(item.id, { url: item.url, offscreen: false });
+  });
+} catch {
+  // WXT's build-time fake browser does not implement downloads.onCreated.
+}
+
 try {
   browser.downloads.onChanged.addListener(delta => {
     if (delta.state?.current !== 'complete' && delta.state?.current !== 'interrupted') return;
@@ -74,7 +101,13 @@ try {
 
 interface RedgifsAuthResponse { token?: string }
 interface RedgifsGifResponse {
-  gif?: { urls?: { hd?: string; sd?: string; thumbnail?: string; poster?: string } };
+  gif?: {
+    urls?: { hd?: string; sd?: string; thumbnail?: string; poster?: string };
+    description?: string;
+    title?: string;
+    userName?: string;
+    tags?: string[];
+  };
 }
 
 let redgifsToken = '';
@@ -109,9 +142,23 @@ async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> 
     const videoUrl = urls?.hd ?? urls?.sd;
     if (!videoUrl || !isRedgifsUrl(videoUrl)) return { ok: true, not_found: true };
     const imageUrl = urls?.thumbnail ?? urls?.poster ?? videoUrl.replace(/\.[a-z0-9]+$/i, '-mobile.jpg');
+    const source = data.gif;
+    const description = source?.description?.trim() ?? '';
+    const title = source?.title?.trim() || description.split(/\r?\n/).map(line => line.trim()).filter(Boolean).find(line => !/^#[\p{L}\p{N}_\s]+$/u.test(line)) || '';
+    const tags = Array.isArray(source?.tags)
+      ? source.tags.map(tag => tag.trim()).filter(Boolean).map(tag => tag.startsWith('#') ? tag : `#${tag}`)
+      : [];
     return {
       ok: true,
-      gif: { videoUrl, imageUrl: isRedgifsUrl(imageUrl) ? imageUrl : videoUrl },
+      gif: {
+        videoUrl,
+        imageUrl: isRedgifsUrl(imageUrl) ? imageUrl : videoUrl,
+        metadata: {
+          title: title || null,
+          author: source?.userName?.trim() || null,
+          tags,
+        },
+      },
     };
   } catch (error) {
     console.error('[RG Scroller] Error al consultar la API de RedGifs', error);
@@ -166,7 +213,7 @@ async function startVideoDownload(
   id: string,
   url: string,
   metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
-): Promise<{ downloadId: number; metadataEmbedded: boolean; metadataWarning?: string }> {
+): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
   const filename = `redgifs/${id}.${extensionOf(url)}`;
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
@@ -212,12 +259,25 @@ async function startVideoDownload(
     }
     if (!blobUrl) throw new Error('No se pudo crear el archivo MP4 temporal');
     const preparedBlobUrl = blobUrl;
-    const downloadId = await downloadWithRetry({
-      url: preparedBlobUrl,
-      filename,
-      conflictAction: 'uniquify',
-      saveAs: false,
-    });
+    // Firefox's downloads API may reject Blob URLs from extensions. Its
+    // background-page anchor path can download the same tagged bytes directly.
+    if (!blobCreatedOffscreen && triggerAnchorDownload(preparedBlobUrl, filename)) {
+      return { metadataEmbedded: true };
+    }
+    let downloadId: number;
+    try {
+      downloadId = await downloadWithRetry({
+        url: preparedBlobUrl,
+        filename,
+        conflictAction: 'uniquify',
+        saveAs: false,
+      });
+    } catch (downloadError) {
+      // Firefox may reject a Blob URL in downloads.download even when the
+      // Blob was created by the extension background page. Use its native
+      // anchor download path before falling back to the unmodified MP4.
+      throw downloadError;
+    }
     blobUrlsByDownloadId.set(downloadId, { url: preparedBlobUrl, offscreen: blobCreatedOffscreen });
     // Cubre el caso de archivos pequeños que completan antes de registrar el ID.
     try {
