@@ -100,11 +100,12 @@ jobs:
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
+            CONFIGURATION_BUILD_DIR="$GITHUB_WORKSPACE/.output/safari-build" \
             build
 
       - name: Zip the built app
         run: |
-          APP_PATH=$(find .output/safari-xcode -name "*.app" -path "*/Release/*" | head -n 1)
+          APP_PATH=$(find .output/safari-build -maxdepth 1 -name "*.app" | head -n 1)
           echo "Found app: $APP_PATH"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" .output/safari-app.zip
 
