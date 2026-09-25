@@ -73,6 +73,13 @@ jobs:
             --no-prompt \
             --force
 
+      - name: Fix bundle identifier mismatch
+        run: |
+          PBXPROJ=$(find .output/safari-xcode -name "project.pbxproj" | head -n 1)
+          echo "Patching: $PBXPROJ"
+          sed -i '' 's/com\.dao088\.RedGifs-Downloader/com.dao088.redgifs-downloader/g' "$PBXPROJ"
+          grep -i "PRODUCT_BUNDLE_IDENTIFIER" "$PBXPROJ"
+
       - name: Locate and build Xcode project
         run: |
           XCODEPROJ=$(find .output/safari-xcode -maxdepth 3 -name "*.xcodeproj" | head -n 1)
