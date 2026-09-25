@@ -10,6 +10,7 @@ export default defineContentScript({
     // ---------- Constantes ----------
     const PANEL_ID = 'rg-scroller-panel';
     const STYLE_ID = 'rg-scroller-style';
+    // El panel se reintenta hasta 5 veces si no encuentra el item activo (por
     // Selector "feliz" del feed de scroll infinito. Si RedGifs cambia el
     // markup y esto deja de matchear, getActiveItem() igual sigue andando
     // en /watch/<id> (lee el id de la URL) y en perfiles/grillas (usa el
