@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -25,10 +25,67 @@ jobs:
 
       - name: Zip extensions
         run: |
-          pnpm wxt zip
-          pnpm wxt zip -b firefox
+          pnpm zip
+          pnpm zip:firefox
+
+      - name: Duplicate chrome build for other Chromium browsers
+        run: |
+          cd .output
+          CHROME_ZIP=$(ls *-chrome.zip)
+          BASE_NAME=$(basename "$CHROME_ZIP" -chrome.zip)
+          for browser in edge brave opera whale; do
+            cp "$CHROME_ZIP" "${BASE_NAME}-${browser}.zip"
+          done
+          cd ..
 
       - name: Upload zips to release
         uses: softprops/action-gh-release@v2
         with:
           files: .output/*.zip
+
+  build-safari:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build for Safari
+        run: pnpm wxt build -b safari
+
+      - name: Convert to Xcode project
+        run: |
+          xcrun safari-web-extension-converter .output/safari-mv2 \
+            --project-location .output/safari-xcode \
+            --app-name "RedGifs Downloader" \
+            --bundle-identifier com.dao088.redgifs-downloader \
+            --no-open \
+            --no-prompt \
+            --force
+
+      - name: Build Xcode project (ad-hoc, unsigned)
+        run: |
+          cd .output/safari-xcode
+          xcodebuild -scheme "RedGifs Downloader" \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Zip the built app
+        run: |
+          cd .output/safari-xcode
+          APP_PATH=$(find . -name "*.app" -path "*/Release/*" | head -n 1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ../safari-app.zip
+
+      - name: Upload Safari build to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: .output/safari-app.zip
