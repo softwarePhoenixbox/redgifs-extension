@@ -63,6 +63,7 @@ jobs:
 
       - name: Convert to Xcode project
         run: |
+          rm -rf .output/safari-xcode
           xcrun safari-web-extension-converter .output/safari-mv2 \
             --project-location .output/safari-xcode \
             --app-name "RedGifs Downloader" \
