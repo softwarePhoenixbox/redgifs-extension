@@ -39,7 +39,7 @@ jobs:
           cd ..
 
       - name: Upload zips to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: .output/*.zip
 
@@ -110,6 +110,6 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" .output/safari-app.zip
 
       - name: Upload Safari build to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: .output/safari-app.zip
