@@ -67,6 +67,7 @@ jobs:
             --project-location .output/safari-xcode \
             --app-name "RedGifs Downloader" \
             --bundle-identifier com.dao088.redgifs-downloader \
+            --macos-only \
             --no-open \
             --no-prompt \
             --force
@@ -76,9 +77,17 @@ jobs:
           XCODEPROJ=$(find .output/safari-xcode -maxdepth 3 -name "*.xcodeproj" | head -n 1)
           echo "Found project: $XCODEPROJ"
           PROJECT_DIR=$(dirname "$XCODEPROJ")
-          SCHEME_NAME=$(basename "$XCODEPROJ" .xcodeproj)
+          PROJECT_FILE=$(basename "$XCODEPROJ")
           cd "$PROJECT_DIR"
-          xcodebuild -project "$(basename "$XCODEPROJ")" \
+
+          echo "Available schemes:"
+          xcodebuild -project "$PROJECT_FILE" -list
+
+          SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list | \
+            awk '/Schemes:/{flag=1; next} flag && NF{print $1; exit}')
+          echo "Using scheme: $SCHEME_NAME"
+
+          xcodebuild -project "$PROJECT_FILE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
