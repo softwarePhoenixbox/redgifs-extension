@@ -71,19 +71,24 @@ jobs:
             --no-prompt \
             --force
 
-      - name: Build Xcode project (ad-hoc, unsigned)
+      - name: Locate and build Xcode project
         run: |
-          cd .output/safari-xcode
-          xcodebuild -scheme "RedGifs Downloader" \
+          XCODEPROJ=$(find .output/safari-xcode -maxdepth 3 -name "*.xcodeproj" | head -n 1)
+          echo "Found project: $XCODEPROJ"
+          PROJECT_DIR=$(dirname "$XCODEPROJ")
+          SCHEME_NAME=$(basename "$XCODEPROJ" .xcodeproj)
+          cd "$PROJECT_DIR"
+          xcodebuild -project "$(basename "$XCODEPROJ")" \
+            -scheme "$SCHEME_NAME" \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
             build
 
       - name: Zip the built app
         run: |
-          cd .output/safari-xcode
-          APP_PATH=$(find . -name "*.app" -path "*/Release/*" | head -n 1)
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ../safari-app.zip
+          APP_PATH=$(find .output/safari-xcode -name "*.app" -path "*/Release/*" | head -n 1)
+          echo "Found app: $APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" .output/safari-app.zip
 
       - name: Upload Safari build to release
         uses: softprops/action-gh-release@v2
