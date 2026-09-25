@@ -4,7 +4,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
   manifest: {
     name: 'RedGifs Extension',
-    version: '0.1.44',
+    version: '0.1.45',
     permissions: ['activeTab', 'storage', 'downloads'],
     host_permissions: ['https://api.redgifs.com/*', 'https://media.redgifs.com/*', 'https://reddit.com/*', 'https://*.reddit.com/*'],
     browser_specific_settings: {

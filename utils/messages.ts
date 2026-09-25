@@ -40,6 +40,7 @@ export type RgRequest =
       tags?: string[];
       pageUrl?: string;
       filename?: string;
+      useOriginalFilename?: boolean;
       quality?: 'hd' | 'sd' | 'image';
     }
   | {

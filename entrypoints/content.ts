@@ -367,7 +367,10 @@ export default defineContentScript({
     }
 
     function requestedFilename(root: HTMLElement | null, choice: DownloadChoice): string | undefined {
-      if (!originalFilenameEnabled) return undefined;
+      if (!originalFilenameEnabled) {
+        console.info('[RG Scroller] Nombres originales de RedGifs desactivados', { choice, page: location.href });
+        return undefined;
+      }
       const filename = originalFilename(root, choice);
       const details = { choice, filename: filename ?? null, page: location.href };
       if (filename) console.info('[RG Scroller] Filename de RedGifs detectado', details);
@@ -424,6 +427,7 @@ export default defineContentScript({
       const download = await send({
         type: 'RG_DOWNLOAD', id, url, quality: choice,
         filename: requestedFilename(root, choice),
+        useOriginalFilename: originalFilenameEnabled,
         ...(choice === 'image' ? {} : {
           title: domMeta.title ?? apiMeta?.title ?? undefined,
           author: domMeta.author ?? apiMeta?.author ?? undefined,
@@ -670,6 +674,7 @@ export default defineContentScript({
             const chosenFilename = requestedFilename(mediaRoot, quality);
             const res = await send({
               type: 'RG_DOWNLOAD', id, url: selectedUrl, quality, filename: chosenFilename,
+              useOriginalFilename: originalFilenameEnabled,
               ...(quality === 'image' ? {} : {
                 title: meta.title ?? undefined,
                 author: meta.author ?? undefined,

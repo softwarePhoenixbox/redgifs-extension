@@ -280,7 +280,14 @@ function extensionOf(url: string): string {
   return match?.[1]?.toLowerCase() ?? 'mp4';
 }
 
-function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'image', requestedName?: string): string {
+function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'image', requestedName?: string, useOriginalFilename?: boolean): string {
+  if (useOriginalFilename === false) {
+    const extension = extensionOf(url);
+    const randomId = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+    return `redgifs/${randomId}.${extension}`;
+  }
   if (requestedName && /^[\w-]+\.(?:mp4|m4v|jpg|jpeg|png)$/i.test(requestedName)) {
     return `redgifs/${requestedName}`;
   }
@@ -300,10 +307,11 @@ async function startVideoDownload(
   metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
   quality?: 'hd' | 'sd' | 'image',
   requestedName?: string,
+  useOriginalFilename?: boolean,
 ): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
   // Media URLs carry RedGifs' canonical case-sensitive ID (e.g.
   // ZanyJudiciousRook-mobile.mp4); prefer it over lowercase /ifr/ IDs.
-  const filename = downloadFilename(id, url, quality, requestedName);
+  const filename = downloadFilename(id, url, quality, requestedName, useOriginalFilename);
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
     return {
@@ -403,11 +411,12 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
       console.info('[RG Scroller] Nombre final enviado a Downloads', {
         requested: msg.filename ?? null,
-        filename: downloadFilename(msg.id, msg.url, msg.quality, msg.filename),
+        filename: downloadFilename(msg.id, msg.url, msg.quality, msg.filename, msg.useOriginalFilename),
         quality: msg.quality ?? 'hd',
+        useOriginalFilename: msg.useOriginalFilename ?? null,
       });
       // Descarga en el background y añade metadatos Xtra/QuickTime sin recodificar.
-      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality, msg.filename);
+      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality, msg.filename, msg.useOriginalFilename);
       return {
         ok: true,
         downloadId: result.downloadId,
