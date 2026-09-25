@@ -379,12 +379,29 @@ export default defineContentScript({
       return filename;
     }
 
+    function isFullscreenView(): boolean {
+      const fullscreenDocument = document as Document & { webkitFullscreenElement?: Element | null };
+      return Boolean(fullscreenDocument.fullscreenElement || fullscreenDocument.webkitFullscreenElement);
+    }
+
     function showDownloadMenu(anchor: HTMLElement, choices: DownloadChoice[], onChoose: (choice: DownloadChoice) => void): void {
       document.getElementById('rg-quality-menu')?.remove();
       const rect = anchor.getBoundingClientRect();
       const menu = document.createElement('div');
       menu.id = 'rg-quality-menu';
-      menu.style.cssText = `position:fixed;z-index:10010;top:${Math.min(rect.bottom + 5, window.innerHeight - 90)}px;left:${Math.max(8, Math.min(rect.left, window.innerWidth - 150))}px;display:flex;gap:5px;padding:6px;background:#181818;border:1px solid #555;border-radius:7px;box-shadow:0 5px 18px #0009;`;
+      const fullscreenDocument = document as Document & { webkitFullscreenElement?: Element | null };
+      const fullscreenElement = fullscreenDocument.fullscreenElement ?? fullscreenDocument.webkitFullscreenElement ?? null;
+      const menuWidth = 164;
+      const menuHeight = choices.length * 36 + 14;
+      const fullscreen = isFullscreenView();
+      const left = fullscreen
+        ? Math.max(8, window.innerWidth - menuWidth - 12)
+        : Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8));
+      const below = fullscreen ? rect.bottom + 8 : rect.bottom + 5;
+      const top = below + menuHeight <= window.innerHeight - 8
+        ? below
+        : Math.max(8, fullscreen ? window.innerHeight - menuHeight - 16 : rect.top - menuHeight - 5);
+      menu.style.cssText = `position:fixed;z-index:2147483647;top:${top}px;left:${left}px;width:${menuWidth}px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;padding:7px;background:#181818;border:1px solid #555;border-radius:7px;box-shadow:0 5px 18px #0009;`;
       const dismiss = (event: Event) => {
         if (!menu.contains(event.target as Node) && event.target !== anchor) {
           menu.remove();
@@ -395,7 +412,7 @@ export default defineContentScript({
         const button = document.createElement('button');
         button.type = 'button';
         button.textContent = t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame');
-        button.style.cssText = 'border:0;border-radius:5px;padding:6px 12px;background:#2f6bff;color:#fff;font:bold 12px sans-serif;cursor:pointer;';
+        button.style.cssText = 'width:100%;border:0;border-radius:5px;padding:8px 10px;background:#2f6bff;color:#fff;font:bold 12px sans-serif;cursor:pointer;text-align:center;';
         button.addEventListener('click', event => {
           event.preventDefault();
           event.stopPropagation();
@@ -405,7 +422,10 @@ export default defineContentScript({
         }, { once: true });
         menu.appendChild(button);
       }
-      document.body.appendChild(menu);
+      // A fullscreen element is promoted above the document's normal stacking
+      // contexts. Mount the menu inside it so the choices render above the
+      // player instead of getting trapped behind its fullscreen layer.
+      (fullscreenElement ?? document.body).appendChild(menu);
       setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
     }
 
@@ -415,7 +435,8 @@ export default defineContentScript({
       const embeddedInReddit = ancestors.some(origin => {
         try { return /(^|\.)reddit\.com$/i.test(new URL(origin).hostname); } catch { return false; }
       }) || /(^|\.)reddit\.com\//i.test(document.referrer);
-      if (choices.length > 1 && embeddedInReddit) {
+      const fullscreen = isFullscreenView();
+      if (choices.length > 1 && embeddedInReddit && !fullscreen) {
         const requestId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         pendingRedditMenuChoices.set(requestId, action);
         void send({ type: 'RG_REDDIT_MENU_OPEN', requestId, gifId: getActiveItem()?.id ?? '', choices }).then(response => {
