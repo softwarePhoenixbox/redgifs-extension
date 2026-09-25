@@ -295,7 +295,7 @@ function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'imag
   let name = mediaUrl.pathname.split('/').filter(Boolean).at(-1) ?? '';
   try { name = decodeURIComponent(name); } catch { /* keep the encoded segment */ }
   if (!/^[\w-]+\.(?:mp4|m4v|jpg|jpeg|png)$/i.test(name)) {
-    const suffix = quality === 'sd' || quality === 'image' ? '-mobile' : '';
+    const suffix = quality === 'sd' ? '-sd' : quality === 'image' ? '-image' : '';
     name = `${id}${suffix}.${extensionOf(url)}`;
   }
   return `redgifs/${name}`;

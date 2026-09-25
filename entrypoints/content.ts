@@ -361,7 +361,7 @@ export default defineContentScript({
         ?? candidates.find(candidate => !isUuid(candidate))
         ?? candidates[0];
       if (!id) return undefined;
-      const suffix = choice === 'hd' ? '' : choice === 'frame' ? '-frame' : '-mobile';
+      const suffix = choice === 'hd' ? '' : choice === 'sd' ? '-sd' : choice === 'frame' ? '-frame' : choice === 'image' ? '-image' : '-mobile';
       const extension = choice === 'image' || choice === 'frame' ? 'jpg' : 'mp4';
       return `${id}${suffix}.${extension}`;
     }
