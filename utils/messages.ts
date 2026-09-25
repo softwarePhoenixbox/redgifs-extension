@@ -32,6 +32,10 @@ export type RgRequest =
   | { type: 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB'; base64: string }
   | { type: 'RG_OFFSCREEN_REVOKE_BLOB'; blob_url: string }
   | { type: 'RG_DOWNLOAD_FRAME'; id: string; base64: string; filename?: string; useOriginalFilename?: boolean }
+  | { type: 'RG_REDDIT_MENU_OPEN'; requestId: string; gifId: string; choices: Array<'hd' | 'sd' | 'image' | 'frame'> }
+  | { type: 'RG_REDDIT_MENU_SHOW'; requestId: string; gifId: string; choices: Array<'hd' | 'sd' | 'image' | 'frame'> }
+  | { type: 'RG_REDDIT_MENU_SELECTED'; requestId: string; choice: 'hd' | 'sd' | 'image' | 'frame' }
+  | { type: 'RG_REDDIT_MENU_CHOOSE'; requestId: string; choice: 'hd' | 'sd' | 'image' | 'frame' }
   | { type: 'RG_RESOLVE_GIF'; id: string }
   | {
       type: 'RG_DOWNLOAD';

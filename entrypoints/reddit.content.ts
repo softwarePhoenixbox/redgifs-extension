@@ -94,6 +94,79 @@ export default defineContentScript({
       setTimeout(() => element.remove(), 3000);
     }
 
+    function redgifsFrameFor(id: string): HTMLIFrameElement | undefined {
+      const pending: ParentNode[] = [document];
+      const visited = new Set<ParentNode>();
+      while (pending.length) {
+        const scope = pending.shift()!;
+        if (visited.has(scope)) continue;
+        visited.add(scope);
+        for (const frame of Array.from(scope.querySelectorAll<HTMLIFrameElement>('iframe'))) {
+          try {
+            const url = new URL(frame.src, location.href);
+            const match = /\/ifr\/([\w-]+)/i.exec(url.pathname);
+            if (url.hostname.endsWith('redgifs.com') && match?.[1]?.toLowerCase() === id.toLowerCase()) return frame;
+          } catch { /* ignore malformed or not-yet-hydrated frames */ }
+        }
+        for (const element of Array.from(scope.querySelectorAll<HTMLElement>('*'))) {
+          if (element.shadowRoot) pending.push(element.shadowRoot);
+        }
+      }
+      return undefined;
+    }
+
+    function showRedditChoiceMenu(requestId: string, gifId: string, choices: Array<'hd' | 'sd' | 'image' | 'frame'>): void {
+      document.getElementById('rg-reddit-external-quality-menu')?.remove();
+      const frame = redgifsFrameFor(gifId);
+      const rect = frame?.getBoundingClientRect();
+      const width = 154;
+      const height = choices.length * 37 + 14;
+      let left = rect ? rect.right + 8 : innerWidth - width - 12;
+      let top = rect ? rect.top + 8 : 96;
+      if (left + width > innerWidth - 8) left = rect ? Math.max(8, rect.left - width - 8) : 8;
+      if (left + width > innerWidth - 8 && rect) {
+        left = Math.max(8, Math.min(rect.left, innerWidth - width - 8));
+        top = rect.bottom + 8;
+      }
+      top = Math.max(8, Math.min(top, innerHeight - height - 8));
+
+      const menu = document.createElement('div');
+      menu.id = 'rg-reddit-external-quality-menu';
+      menu.style.cssText = `position:fixed;z-index:2147483647;top:${top}px;left:${left}px;width:${width}px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;padding:7px;background:#181818;border:1px solid #555;border-radius:7px;box-shadow:0 5px 18px #0009;`;
+      const labelFor = (choice: 'hd' | 'sd' | 'image' | 'frame') => t(
+        choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame',
+      );
+      const dismiss = (event: Event) => {
+        if (!menu.contains(event.target as Node)) {
+          menu.remove();
+          document.removeEventListener('pointerdown', dismiss, true);
+        }
+      };
+      for (const choice of choices) {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.textContent = labelFor(choice);
+        option.style.cssText = 'width:100%;border:0;border-radius:5px;padding:8px 10px;background:#2f6bff;color:#fff;font:bold 12px Arial,sans-serif;cursor:pointer;text-align:center;';
+        option.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          menu.remove();
+          document.removeEventListener('pointerdown', dismiss, true);
+          void browser.runtime.sendMessage({ type: 'RG_REDDIT_MENU_SELECTED', requestId, choice });
+        }, { once: true });
+        menu.appendChild(option);
+      }
+      document.body.appendChild(menu);
+      setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
+    }
+
+    browser.runtime.onMessage.addListener((message: RgRequest, _sender, sendResponse) => {
+      if (message.type !== 'RG_REDDIT_MENU_SHOW') return undefined;
+      showRedditChoiceMenu(message.requestId, message.gifId, message.choices);
+      sendResponse({ ok: true } satisfies RgResponse);
+      return false;
+    });
+
     function createDownloadButton(): HTMLButtonElement {
       const button = document.createElement('button');
       button.type = 'button';

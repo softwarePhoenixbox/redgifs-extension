@@ -23,6 +23,7 @@ interface ChromeOffscreenApi {
 const blobUrlsByDownloadId = new Map<number, { url: string; offscreen: boolean }>();
 const pendingAnchorBlobUrls = new Set<string>();
 const pendingFilenameSuggestions = new Map<string, { filename: string; timeout: ReturnType<typeof setTimeout> }>();
+const pendingRedditMenuTargets = new Map<string, { tabId: number; frameId: number }>();
 let creatingOffscreenDocument: Promise<void> | null = null;
 
 // Chrome ignores DownloadOptions.filename when another extension has a
@@ -597,6 +598,45 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
+    if (message.type === 'RG_REDDIT_MENU_OPEN') {
+      const tabId = sender.tab?.id;
+      const frameId = sender.frameId;
+      if (tabId === undefined || frameId === undefined || frameId === 0) {
+        sendResponse({ ok: false, error: 'No se encontró el marco del reproductor de Reddit.' } satisfies RgResponse);
+        return false;
+      }
+      pendingRedditMenuTargets.set(message.requestId, { tabId, frameId });
+      void browser.tabs.sendMessage(tabId, {
+        type: 'RG_REDDIT_MENU_SHOW',
+        requestId: message.requestId,
+        gifId: message.gifId,
+        choices: message.choices,
+      }, { frameId: 0 }).then(response => {
+        sendResponse(response ?? { ok: true } satisfies RgResponse);
+      }).catch((error: unknown) => {
+        pendingRedditMenuTargets.delete(message.requestId);
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RgResponse);
+      });
+      return true;
+    }
+    if (message.type === 'RG_REDDIT_MENU_SELECTED') {
+      const target = pendingRedditMenuTargets.get(message.requestId);
+      pendingRedditMenuTargets.delete(message.requestId);
+      if (!target || sender.tab?.id !== target.tabId || sender.frameId !== 0) {
+        sendResponse({ ok: false, error: 'La opción de descarga ya no está disponible.' } satisfies RgResponse);
+        return false;
+      }
+      void browser.tabs.sendMessage(target.tabId, {
+        type: 'RG_REDDIT_MENU_CHOOSE',
+        requestId: message.requestId,
+        choice: message.choice,
+      }, { frameId: target.frameId }).then(response => {
+        sendResponse(response ?? { ok: true } satisfies RgResponse);
+      }).catch((error: unknown) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RgResponse);
+      });
+      return true;
+    }
     // runtime.onMessage solo recibe mensajes de esta extensión; no filtramos
     // sender.id porque Chrome puede omitirlo en algunos mensajes de content script.
     console.debug(`[RG Scroller] Background recibió ${message.type}`, {

@@ -238,6 +238,7 @@ export default defineContentScript({
     let downloadActionEnabled = true;
     let downloadOptions: DownloadOptions = DEFAULT_DOWNLOAD_OPTIONS;
     let originalFilenameEnabled = true;
+    const pendingRedditMenuChoices = new Map<string, (choice: DownloadChoice) => void>();
 
     moveBtn.addEventListener('click', () => {
       panelPositionIdx = (panelPositionIdx + 1) % PANEL_POSITIONS.length;
@@ -410,7 +411,20 @@ export default defineContentScript({
 
     function requestDownloadChoice(anchor: HTMLElement, action: (choice: DownloadChoice) => void): void {
       const choices = enabledDownloadChoices(downloadOptions);
-      if (choices.length > 1) showDownloadMenu(anchor, choices, action);
+      const ancestors = Array.from((location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins ?? []);
+      const embeddedInReddit = ancestors.some(origin => {
+        try { return /(^|\.)reddit\.com$/i.test(new URL(origin).hostname); } catch { return false; }
+      }) || /(^|\.)reddit\.com\//i.test(document.referrer);
+      if (choices.length > 1 && embeddedInReddit) {
+        const requestId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        pendingRedditMenuChoices.set(requestId, action);
+        void send({ type: 'RG_REDDIT_MENU_OPEN', requestId, gifId: getActiveItem()?.id ?? '', choices }).then(response => {
+          if (response.ok) return;
+          pendingRedditMenuChoices.delete(requestId);
+          showDownloadMenu(anchor, choices, action);
+        });
+      }
+      else if (choices.length > 1) showDownloadMenu(anchor, choices, action);
       else if (choices.length === 1) action(choices[0]!);
       else showToast(t('noDownloadOptions'), 'error');
     }
@@ -1196,6 +1210,17 @@ export default defineContentScript({
     // el modo selección. Se registra temprano para no perder el primer
     // toggle si el popup se abre apenas cargó la página.
     browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
+      if (message.type === 'RG_REDDIT_MENU_CHOOSE') {
+        const action = pendingRedditMenuChoices.get(message.requestId);
+        pendingRedditMenuChoices.delete(message.requestId);
+        if (action) {
+          action(message.choice);
+          sendResponse({ ok: true } satisfies RgResponse);
+        } else {
+          sendResponse({ ok: false, error: 'La opción de descarga ya no está disponible.' } satisfies RgResponse);
+        }
+        return false;
+      }
       if (message.type === 'RG_GET_GRID_SELECT_STATE') {
         const pending = Array.from(selectedIds.keys()).filter(id => !savedIds.has(id)).length;
         sendResponse({
