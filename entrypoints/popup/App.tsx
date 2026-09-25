@@ -70,16 +70,18 @@ export default function App() {
   const [panelEnabled, setPanelEnabled] = useState(false);
   const [downloadActionEnabled, setDownloadActionEnabled] = useState(true);
   const [downloadOptions, setDownloadOptions] = useState<DownloadOptions>(DEFAULT_DOWNLOAD_OPTIONS);
+  const [originalFilenameEnabled, setOriginalFilenameEnabled] = useState(true);
   const [language, setLanguage] = useState<PopupLanguage>('en');
   const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
   useEffect(() => {
-    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage', 'rgDownloadQuality', 'rgDownloadOptions']).then(values => {
+    void browser.storage.local.get(['rgPanelEnabled', 'rgDownloadActionEnabled', 'rgLanguage', 'rgDownloadQuality', 'rgDownloadOptions', 'rgOriginalFilename']).then(values => {
       setPanelEnabled(values.rgPanelEnabled === true);
       setDownloadActionEnabled(values.rgDownloadActionEnabled !== false);
       const savedLanguage: PopupLanguage = values.rgLanguage === 'es' ? 'es' : 'en';
       setLanguage(savedLanguage);
       setDownloadOptions(normalizeDownloadOptions(values.rgDownloadOptions, values.rgDownloadQuality));
+      setOriginalFilenameEnabled(values.rgOriginalFilename !== false);
       document.documentElement.lang = savedLanguage;
     });
   }, []);
@@ -100,6 +102,11 @@ export default function App() {
     const next = { ...downloadOptions, [choice]: enabled };
     setDownloadOptions(next);
     await browser.storage.local.set({ rgDownloadOptions: next });
+  }
+
+  async function updateOriginalFilename(enabled: boolean) {
+    setOriginalFilenameEnabled(enabled);
+    await browser.storage.local.set({ rgOriginalFilename: enabled });
   }
 
   // El estado de este popup se reinicia cada vez que se cierra y se vuelve
@@ -291,6 +298,10 @@ export default function App() {
                   {t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : 'downloadImage')}
                 </label>
               ))}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: 'pointer' }}>
+                <input type="checkbox" checked={originalFilenameEnabled} onChange={e => void updateOriginalFilename(e.target.checked)} />
+                {t('originalFilename')}
+              </label>
               <small style={{ display: 'block', color: '#999', lineHeight: 1.3, marginTop: 2 }}>{t('downloadOptionsHint')}</small>
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>

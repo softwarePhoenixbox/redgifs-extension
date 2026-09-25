@@ -24,6 +24,7 @@ export default defineContentScript({
     const DOWNLOAD_ACTION_ENABLED_KEY = 'rgDownloadActionEnabled';
     const DOWNLOAD_QUALITY_KEY = 'rgDownloadQuality';
     const DOWNLOAD_OPTIONS_KEY = 'rgDownloadOptions';
+    const ORIGINAL_FILENAME_KEY = 'rgOriginalFilename';
     const LANGUAGE_KEY = 'rgLanguage';
     let language: PopupLanguage = 'en';
     const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
@@ -236,6 +237,7 @@ export default defineContentScript({
     let panelEnabled = false;
     let downloadActionEnabled = true;
     let downloadOptions: DownloadOptions = DEFAULT_DOWNLOAD_OPTIONS;
+    let originalFilenameEnabled = true;
 
     moveBtn.addEventListener('click', () => {
       panelPositionIdx = (panelPositionIdx + 1) % PANEL_POSITIONS.length;
@@ -305,6 +307,74 @@ export default defineContentScript({
       return hd.replace(/\.mp4(?=([?#]|$))/i, '-mobile.mp4');
     }
 
+    function originalFilename(root: HTMLElement | null, choice: DownloadChoice): string | undefined {
+      const findIn = (scope: ParentNode): string[] => {
+        const pending: ParentNode[] = [scope];
+        const visited = new Set<ParentNode>();
+        const urls: string[] = [];
+        while (pending.length) {
+          const current = pending.shift()!;
+          if (visited.has(current)) continue;
+          visited.add(current);
+          const elements = Array.from(current.querySelectorAll<HTMLElement>('*'));
+          for (const element of elements) {
+            if (element.shadowRoot) pending.push(element.shadowRoot);
+            urls.push(element.getAttribute('data-poster') ?? '', element.getAttribute('data-src') ?? '');
+            const inlineStyle = element.getAttribute('style') ?? '';
+            urls.push(...Array.from(inlineStyle.matchAll(/url\(["']?(.*?)["']?\)/g), match => match[1] ?? ''));
+          }
+          // Prioritize the active media's poster/source instead of returning
+          // the first thumbnail in DOM order (which can be an internal UUID).
+          for (const video of Array.from(current.querySelectorAll<HTMLVideoElement>('video'))) {
+            urls.push(video.getAttribute('poster') ?? '', video.poster, video.currentSrc, video.src);
+          }
+          for (const image of Array.from(current.querySelectorAll<HTMLImageElement>('img'))) {
+            urls.push(image.currentSrc, image.getAttribute('src') ?? '', image.src);
+          }
+          for (const source of Array.from(current.querySelectorAll<HTMLSourceElement>('source'))) {
+            urls.push(source.getAttribute('src') ?? '', source.src);
+          }
+          for (const anchor of Array.from(current.querySelectorAll<HTMLAnchorElement>('a[href*="media.redgifs.com/"]'))) {
+            urls.push(anchor.href);
+          }
+        }
+        for (const entry of performance.getEntriesByType('resource')) urls.push(entry.name);
+        const ids: string[] = [];
+        for (const rawUrl of urls) {
+          if (!rawUrl) continue;
+          let mediaUrl: URL;
+          try { mediaUrl = new URL(rawUrl, location.href); } catch { continue; }
+          if (mediaUrl.hostname !== 'redgifs.com' && !mediaUrl.hostname.endsWith('.redgifs.com')) continue;
+          let basename = mediaUrl.pathname.split('/').filter(Boolean).at(-1) ?? '';
+          try { basename = decodeURIComponent(basename); } catch { /* keep encoded name */ }
+          const match = /^(.+?)(?:-mobile|-silent)?\.(?:jpg|jpeg|mp4|m4v)$/i.exec(basename);
+          if (match?.[1]) ids.push(match[1]);
+        }
+        return ids;
+      };
+
+      const candidates = [...new Set([...(root ? findIn(root) : []), ...findIn(document)])];
+      // Resource URLs sometimes expose a lowercased alias before the original
+      // case-sensitive media filename. Prefer the canonical mixed-case ID.
+      const isUuid = (candidate: string) => /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(candidate);
+      const id = candidates.find(candidate => !isUuid(candidate) && /[A-Z]/.test(candidate) && /[a-z]/.test(candidate))
+        ?? candidates.find(candidate => !isUuid(candidate))
+        ?? candidates[0];
+      if (!id) return undefined;
+      const suffix = choice === 'hd' ? '' : '-mobile';
+      const extension = choice === 'image' ? 'jpg' : 'mp4';
+      return `${id}${suffix}.${extension}`;
+    }
+
+    function requestedFilename(root: HTMLElement | null, choice: DownloadChoice): string | undefined {
+      if (!originalFilenameEnabled) return undefined;
+      const filename = originalFilename(root, choice);
+      const details = { choice, filename: filename ?? null, page: location.href };
+      if (filename) console.info('[RG Scroller] Filename de RedGifs detectado', details);
+      else console.warn('[RG Scroller] No se encontró filename canónico de RedGifs', details);
+      return filename;
+    }
+
     function showDownloadMenu(anchor: HTMLElement, choices: DownloadChoice[], onChoose: (choice: DownloadChoice) => void): void {
       document.getElementById('rg-quality-menu')?.remove();
       const rect = anchor.getBoundingClientRect();
@@ -353,6 +423,7 @@ export default defineContentScript({
       const apiMeta = result.metadata;
       const download = await send({
         type: 'RG_DOWNLOAD', id, url, quality: choice,
+        filename: requestedFilename(root, choice),
         ...(choice === 'image' ? {} : {
           title: domMeta.title ?? apiMeta?.title ?? undefined,
           author: domMeta.author ?? apiMeta?.author ?? undefined,
@@ -411,7 +482,7 @@ export default defineContentScript({
             requestDownloadChoice(button, quality => {
               button.disabled = true;
               label.textContent = t('preparing');
-              void downloadGifChoice(id, quality, null).catch(error => {
+              void downloadGifChoice(id, quality, player).catch(error => {
                 showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
               }).finally(() => {
                 button.disabled = false;
@@ -543,7 +614,7 @@ export default defineContentScript({
       }
     }
 
-    function renderResult(id: string, result: ResolvedGif, meta: ScrapedMeta): void {
+    function renderResult(id: string, result: ResolvedGif, meta: ScrapedMeta, mediaRoot: HTMLElement | null): void {
       const url = result.hdVideoUrl ?? result.videoUrl;
       const imageUrl = result.imageUrl;
       const card = createEl(
@@ -596,8 +667,9 @@ export default defineContentScript({
             const selectedUrl = quality === 'image'
               ? hdUrl.replace(/(?:-mobile)?\.mp4(?=([?#]|$))/i, '-mobile.jpg')
               : quality === 'sd' ? mobileVideoUrl(result) : hdUrl;
+            const chosenFilename = requestedFilename(mediaRoot, quality);
             const res = await send({
-              type: 'RG_DOWNLOAD', id, url: selectedUrl, quality,
+              type: 'RG_DOWNLOAD', id, url: selectedUrl, quality, filename: chosenFilename,
               ...(quality === 'image' ? {} : {
                 title: meta.title ?? undefined,
                 author: meta.author ?? undefined,
@@ -1109,6 +1181,14 @@ export default defineContentScript({
     //     cercano al centro vertical de la pantalla (best-effort: si el
     //     markup cambia, esto sigue detectando el video en lugar de fallar).
     function getActiveItem(): { id: string; root: HTMLElement | null } | null {
+      // On Reddit's RedGifs /ifr/<id> embed, feed-item IDs can be internal
+      // UUIDs. The iframe URL contains the actual RedGifs ID used in media
+      // filenames, so prefer it before inspecting those generated wrappers.
+      const iframeId = /\/ifr\/([\w-]+)/i.exec(location.pathname)?.[1];
+      if (iframeId) {
+        const root = document.querySelector<HTMLElement>('.embeddedPlayer, [class*="embeddedPlayer"]');
+        return { id: iframeId, root };
+      }
       // En el feed continuo, cambia al siguiente video tan pronto como al
       // menos el 30% de su tarjeta entra en el viewport. Elegir por centro
       // hacía que el icono de descarga se quedara asociado al video anterior
@@ -1189,7 +1269,7 @@ export default defineContentScript({
           author: scraped.author ?? apiMeta?.author ?? null,
           tags: scraped.tags.length ? scraped.tags : (apiMeta?.tags ?? []),
         };
-        renderResult(id, result, meta);
+        renderResult(id, result, meta, root);
       } else {
         renderError(id, result);
         // Si el service worker/background no respondió, no dejamos el panel
@@ -1268,6 +1348,7 @@ export default defineContentScript({
         DOWNLOAD_ACTION_ENABLED_KEY,
         DOWNLOAD_QUALITY_KEY,
         DOWNLOAD_OPTIONS_KEY,
+        ORIGINAL_FILENAME_KEY,
         LANGUAGE_KEY,
       ]);
       autoSave = stored[AUTO_SAVE_KEY] === true;
@@ -1277,6 +1358,7 @@ export default defineContentScript({
       panelEnabled = stored[PANEL_ENABLED_KEY] === true;
       downloadActionEnabled = stored[DOWNLOAD_ACTION_ENABLED_KEY] !== false;
       downloadOptions = normalizeDownloadOptions(stored[DOWNLOAD_OPTIONS_KEY], stored[DOWNLOAD_QUALITY_KEY]);
+      originalFilenameEnabled = stored[ORIGINAL_FILENAME_KEY] !== false;
       language = stored[LANGUAGE_KEY] === 'es' ? 'es' : 'en';
       panel.querySelector('#rg-panel-title')!.textContent = t('panelTitle');
       moveBtn.title = t('movePanel');
@@ -1320,6 +1402,7 @@ export default defineContentScript({
       } else if (changes[DOWNLOAD_QUALITY_KEY] && !changes[DOWNLOAD_OPTIONS_KEY]) {
         downloadOptions = normalizeDownloadOptions(undefined, changes[DOWNLOAD_QUALITY_KEY].newValue);
       }
+      if (changes[ORIGINAL_FILENAME_KEY]) originalFilenameEnabled = changes[ORIGINAL_FILENAME_KEY].newValue !== false;
       if (changes[LANGUAGE_KEY]) {
         language = changes[LANGUAGE_KEY].newValue === 'es' ? 'es' : 'en';
         panel.querySelector('#rg-panel-title')!.textContent = t('panelTitle');

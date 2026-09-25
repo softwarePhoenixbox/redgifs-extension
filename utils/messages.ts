@@ -39,6 +39,7 @@ export type RgRequest =
       author?: string;
       tags?: string[];
       pageUrl?: string;
+      filename?: string;
       quality?: 'hd' | 'sd' | 'image';
     }
   | {

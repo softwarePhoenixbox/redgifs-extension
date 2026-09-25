@@ -22,7 +22,31 @@ interface ChromeOffscreenApi {
 }
 const blobUrlsByDownloadId = new Map<number, { url: string; offscreen: boolean }>();
 const pendingAnchorBlobUrls = new Set<string>();
+const pendingFilenameSuggestions = new Map<string, { filename: string; timeout: ReturnType<typeof setTimeout> }>();
 let creatingOffscreenDocument: Promise<void> | null = null;
+
+// Chrome ignores DownloadOptions.filename when another extension has a
+// downloads.onDeterminingFilename listener. Suggest our explicit target from
+// that event too, and keep the URL/name pair only while Chrome resolves it.
+try {
+  browser.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    const pending = pendingFilenameSuggestions.get(item.url);
+    if (!pending) {
+      suggest();
+      return;
+    }
+    clearTimeout(pending.timeout);
+    pendingFilenameSuggestions.delete(item.url);
+    console.info('[RG Scroller] Sugiriendo nombre final a Chrome', {
+      url: item.url,
+      currentFilename: item.filename,
+      requestedFilename: pending.filename,
+    });
+    suggest({ filename: pending.filename, conflictAction: 'uniquify' });
+  });
+} catch {
+  // Older browser implementations may not expose onDeterminingFilename.
+}
 
 function chromeOffscreenApi(): ChromeOffscreenApi | undefined {
   return (globalThis as typeof globalThis & { chrome?: { offscreen?: ChromeOffscreenApi } }).chrome?.offscreen;
@@ -80,6 +104,11 @@ function triggerAnchorDownload(blobUrl: string, filename: string): boolean {
 
 try {
   browser.downloads.onCreated.addListener(item => {
+    console.info('[RG Scroller] Descarga creada por Chrome', {
+      id: item.id,
+      url: item.url,
+      filename: item.filename,
+    });
     if (!pendingAnchorBlobUrls.delete(item.url)) return;
     blobUrlsByDownloadId.set(item.id, { url: item.url, offscreen: false });
   });
@@ -89,6 +118,12 @@ try {
 
 try {
   browser.downloads.onChanged.addListener(delta => {
+    if (delta.filename) {
+      console.info('[RG Scroller] Chrome fijó el nombre de descarga', {
+        id: delta.id,
+        filename: delta.filename.current,
+      });
+    }
     if (delta.state?.current !== 'complete' && delta.state?.current !== 'interrupted') return;
     const blob = blobUrlsByDownloadId.get(delta.id);
     if (!blob) return;
@@ -209,9 +244,20 @@ async function downloadWithRetry(
 ): Promise<number> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
+    if (options.filename) {
+      const previous = pendingFilenameSuggestions.get(options.url);
+      if (previous) clearTimeout(previous.timeout);
+      const timeout = setTimeout(() => pendingFilenameSuggestions.delete(options.url), 60_000);
+      pendingFilenameSuggestions.set(options.url, { filename: options.filename, timeout });
+    }
     try {
       return await browser.downloads.download(options);
     } catch (err) {
+      const pending = pendingFilenameSuggestions.get(options.url);
+      if (pending && pending.filename === options.filename) {
+        clearTimeout(pending.timeout);
+        pendingFilenameSuggestions.delete(options.url);
+      }
       lastErr = err;
       if (i < attempts - 1) await sleep(DOWNLOAD_BASE_DELAY_MS * 2 ** i);
     }
@@ -234,7 +280,10 @@ function extensionOf(url: string): string {
   return match?.[1]?.toLowerCase() ?? 'mp4';
 }
 
-function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'image'): string {
+function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'image', requestedName?: string): string {
+  if (requestedName && /^[\w-]+\.(?:mp4|m4v|jpg|jpeg|png)$/i.test(requestedName)) {
+    return `redgifs/${requestedName}`;
+  }
   const mediaUrl = new URL(url);
   let name = mediaUrl.pathname.split('/').filter(Boolean).at(-1) ?? '';
   try { name = decodeURIComponent(name); } catch { /* keep the encoded segment */ }
@@ -250,10 +299,11 @@ async function startVideoDownload(
   url: string,
   metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
   quality?: 'hd' | 'sd' | 'image',
+  requestedName?: string,
 ): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
   // Media URLs carry RedGifs' canonical case-sensitive ID (e.g.
   // ZanyJudiciousRook-mobile.mp4); prefer it over lowercase /ifr/ IDs.
-  const filename = downloadFilename(id, url, quality);
+  const filename = downloadFilename(id, url, quality, requestedName);
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
     return {
@@ -351,8 +401,13 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     }
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
+      console.info('[RG Scroller] Nombre final enviado a Downloads', {
+        requested: msg.filename ?? null,
+        filename: downloadFilename(msg.id, msg.url, msg.quality, msg.filename),
+        quality: msg.quality ?? 'hd',
+      });
       // Descarga en el background y añade metadatos Xtra/QuickTime sin recodificar.
-      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality);
+      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality, msg.filename);
       return {
         ok: true,
         downloadId: result.downloadId,
