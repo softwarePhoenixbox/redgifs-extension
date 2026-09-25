@@ -29,7 +29,9 @@ export interface GridSelectionItem {
 
 export type RgRequest =
   | { type: 'RG_OFFSCREEN_PREPARE_BLOB'; url: string; metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null } }
+  | { type: 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB'; base64: string }
   | { type: 'RG_OFFSCREEN_REVOKE_BLOB'; blob_url: string }
+  | { type: 'RG_DOWNLOAD_FRAME'; id: string; base64: string; filename?: string; useOriginalFilename?: boolean }
   | { type: 'RG_RESOLVE_GIF'; id: string }
   | {
       type: 'RG_DOWNLOAD';

@@ -10,6 +10,16 @@ browser.runtime.onMessage.addListener((message: RgRequest, _sender, sendResponse
   // Important: runtime.sendMessage broadcasts to every extension page.
   // Ignore unrelated messages synchronously so this offscreen document
   // cannot race the background listener with an empty Promise response.
+  if (message.type === 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB') {
+    try {
+      const bytes = Uint8Array.from(atob(message.base64), character => character.charCodeAt(0));
+      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+      sendResponse({ ok: true, blob_url: blobUrl } satisfies RgResponse);
+    } catch (error) {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) } satisfies RgResponse);
+    }
+    return false;
+  }
   if (message.type !== 'RG_OFFSCREEN_PREPARE_BLOB') return undefined;
 
   void (async (): Promise<RgResponse> => {

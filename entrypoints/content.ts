@@ -361,8 +361,8 @@ export default defineContentScript({
         ?? candidates.find(candidate => !isUuid(candidate))
         ?? candidates[0];
       if (!id) return undefined;
-      const suffix = choice === 'hd' ? '' : '-mobile';
-      const extension = choice === 'image' ? 'jpg' : 'mp4';
+      const suffix = choice === 'hd' ? '' : choice === 'frame' ? '-frame' : '-mobile';
+      const extension = choice === 'image' || choice === 'frame' ? 'jpg' : 'mp4';
       return `${id}${suffix}.${extension}`;
     }
 
@@ -393,7 +393,7 @@ export default defineContentScript({
       for (const choice of choices) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : 'downloadImage');
+        button.textContent = t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame');
         button.style.cssText = 'border:0;border-radius:5px;padding:6px 12px;background:#2f6bff;color:#fff;font:bold 12px sans-serif;cursor:pointer;';
         button.addEventListener('click', event => {
           event.preventDefault();
@@ -415,7 +415,62 @@ export default defineContentScript({
       else showToast(t('noDownloadOptions'), 'error');
     }
 
+    function findCurrentVideo(root: HTMLElement | null): HTMLVideoElement | undefined {
+      const findLoaded = (initialScope: ParentNode): HTMLVideoElement | undefined => {
+        const pending: ParentNode[] = [initialScope];
+        const visited = new Set<ParentNode>();
+        const videos: HTMLVideoElement[] = [];
+        while (pending.length) {
+          const scope = pending.shift()!;
+          if (visited.has(scope)) continue;
+          visited.add(scope);
+          videos.push(...Array.from(scope.querySelectorAll<HTMLVideoElement>('video')));
+          for (const element of Array.from(scope.querySelectorAll<HTMLElement>('*'))) {
+            if (element.shadowRoot) pending.push(element.shadowRoot);
+          }
+        }
+        return [...new Set(videos)].filter(video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0)
+          .sort((a, b) => Number(a.paused || a.ended) - Number(b.paused || b.ended))[0];
+      };
+      return (root ? findLoaded(root) : undefined) ?? findLoaded(document);
+    }
+
+    async function downloadCurrentFrame(id: string, root: HTMLElement | null): Promise<void> {
+      const video = findCurrentVideo(root);
+      if (!video) throw new Error(language === 'es' ? 'No encontré un fotograma disponible en el reproductor.' : 'No decoded video frame is available yet.');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error(language === 'es' ? 'No se pudo crear el capturador de imagen.' : 'Could not create the image capture canvas.');
+      try {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch (error) {
+        throw new Error(language === 'es' ? 'El navegador bloqueó la captura del fotograma del video.' : 'The browser blocked capture of this video frame.');
+      }
+      let base64: string;
+      try {
+        base64 = canvas.toDataURL('image/jpeg', 0.94).split(',', 2)[1] ?? '';
+      } catch {
+        throw new Error(language === 'es' ? 'RedGifs no permitió leer los píxeles del fotograma.' : 'RedGifs did not allow reading pixels from this frame.');
+      }
+      if (!base64) throw new Error(language === 'es' ? 'La captura salió vacía.' : 'The captured frame was empty.');
+      const response = await send({
+        type: 'RG_DOWNLOAD_FRAME',
+        id,
+        base64,
+        filename: requestedFilename(root, 'frame'),
+        useOriginalFilename: originalFilenameEnabled,
+      });
+      if (!response.ok) throw new Error(response.error);
+      showToast(t('captureFrameStarted'));
+    }
+
     async function downloadGifChoice(id: string, choice: DownloadChoice, root: HTMLElement | null): Promise<void> {
+      if (choice === 'frame') {
+        await downloadCurrentFrame(id, root);
+        return;
+      }
       const result = await getValidLink(id);
       if (result.kind !== 'ok') throw new Error(result.kind === 'error' ? result.message : t('videoUnavailable'));
       const hdUrl = result.hdVideoUrl ?? result.videoUrl;
@@ -667,6 +722,12 @@ export default defineContentScript({
           dlButton.disabled = true;
           setStatus(dlStatus, t('downloadingEmbedding'));
           void (async () => {
+            if (quality === 'frame') {
+              setStatus(dlStatus, t('downloadFrame'));
+              await downloadCurrentFrame(id, mediaRoot);
+              setStatus(dlStatus, t('captureFrameStarted'), 'ok');
+              return;
+            }
             const hdUrl = result.hdVideoUrl ?? result.videoUrl;
             const selectedUrl = quality === 'image'
               ? hdUrl.replace(/(?:-mobile)?\.mp4(?=([?#]|$))/i, '-mobile.jpg')

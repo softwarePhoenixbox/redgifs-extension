@@ -301,6 +301,61 @@ function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'imag
   return `redgifs/${name}`;
 }
 
+function frameDownloadFilename(id: string, requestedName?: string, useOriginalFilename?: boolean): string {
+  if (useOriginalFilename === false) {
+    const randomId = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+    return `redgifs/${randomId}.jpg`;
+  }
+  if (requestedName && /^[\w-]+\.jpg$/i.test(requestedName)) return `redgifs/${requestedName}`;
+  return `redgifs/${id}-frame.jpg`;
+}
+
+async function startFrameDownload(request: Extract<RgRequest, { type: 'RG_DOWNLOAD_FRAME' }>): Promise<number> {
+  if (!ID_RE.test(request.id) || !/^[A-Za-z0-9+/]+={0,2}$/.test(request.base64)) {
+    throw new Error('Datos del fotograma inválidos');
+  }
+  const filename = frameDownloadFilename(request.id, request.filename, request.useOriginalFilename);
+  let blobUrl: string | undefined;
+  let offscreen = false;
+  try {
+    const offscreenApi = chromeOffscreenApi();
+    if (offscreenApi) {
+      await ensureChromeOffscreenDocument(offscreenApi);
+      const prepared = await browser.runtime.sendMessage({
+        type: 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB',
+        base64: request.base64,
+      });
+      if (!prepared?.ok || !prepared.blob_url) throw new Error(prepared?.error ?? 'No se pudo preparar la imagen');
+      blobUrl = prepared.blob_url;
+      offscreen = true;
+    } else {
+      const bytes = base64ToBytes(request.base64);
+      const buffer = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(buffer).set(bytes);
+      blobUrl = URL.createObjectURL(new Blob([buffer], { type: 'image/jpeg' }));
+    }
+    if (!blobUrl) throw new Error('No se pudo crear la imagen temporal');
+    const preparedBlobUrl = blobUrl;
+    const downloadId = await downloadWithRetry({ url: preparedBlobUrl, filename, conflictAction: 'uniquify', saveAs: false });
+    blobUrlsByDownloadId.set(downloadId, { url: preparedBlobUrl, offscreen });
+    try {
+      const [item] = await browser.downloads.search({ id: downloadId });
+      if (item?.state === 'complete' || item?.state === 'interrupted') {
+        releaseBlobUrl({ url: preparedBlobUrl, offscreen });
+        blobUrlsByDownloadId.delete(downloadId);
+      }
+    } catch {
+      // onChanged libera la URL cuando termina la descarga.
+    }
+    return downloadId;
+  } catch (error) {
+    if (blobUrl) releaseBlobUrl({ url: blobUrl, offscreen });
+    throw error;
+  }
+}
+
 async function startVideoDownload(
   id: string,
   url: string,
@@ -423,6 +478,9 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
         metadata_embedded: result.metadataEmbedded,
         metadata_warning: result.metadataWarning,
       };
+    }
+    case 'RG_DOWNLOAD_FRAME': {
+      return { ok: true, downloadId: await startFrameDownload(msg) };
     }
     case 'RG_SAVE_LINK': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');

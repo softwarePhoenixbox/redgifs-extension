@@ -292,10 +292,10 @@ export default function App() {
             </label>
             <div style={{ color: '#ccc', padding: '4px 0' }}>
               <strong style={{ display: 'block', fontWeight: 500, marginBottom: 2 }}>{t('downloadOptions')}</strong>
-              {(['hd', 'sd', 'image'] as const).map(choice => (
+              {(['hd', 'sd', 'image', 'frame'] as const).map(choice => (
                 <label key={choice} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: 'pointer' }}>
                   <input type="checkbox" checked={downloadOptions[choice]} onChange={e => void updateDownloadOption(choice, e.target.checked)} />
-                  {t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : 'downloadImage')}
+                  {t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame')}
                 </label>
               ))}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: 'pointer' }}>
