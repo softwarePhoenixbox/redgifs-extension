@@ -9,6 +9,7 @@ export default defineContentScript({
     const WATCH_ID_RE = /redgifs\.com\/(?:watch|ifr)\/([a-z\d]+)/i;
     let language: PopupLanguage = 'en';
     let qualityMode: 'hd' | 'sd' | 'both' = 'hd';
+    let premium = false; // solo UI; el background valida el plan
     const t = (key: Parameters<typeof popupMessage>[1]) => popupMessage(language, key);
 
     async function send(request: RgRequest): Promise<RgResponse> {
@@ -217,8 +218,9 @@ export default defineContentScript({
               if (label) label.textContent = t('download');
             });
         };
-        if (qualityMode === 'both') showQualityMenu(download, run);
-        else run(qualityMode);
+        const mode = premium ? qualityMode : 'sd';
+        if (mode === 'both') showQualityMenu(download, run);
+        else run(mode);
       });
       tools.appendChild(download);
       target.appendChild(tools);
@@ -232,7 +234,8 @@ export default defineContentScript({
     }
 
     const observer = new MutationObserver(scan);
-    void browser.storage.local.get(['rgLanguage', 'rgDownloadQuality']).then(values => {
+    void browser.storage.local.get(['rgLanguage', 'rgDownloadQuality', 'rgPremium']).then(values => {
+      premium = values.rgPremium === true;
       language = values.rgLanguage === 'es' ? 'es' : 'en';
       const mode = values.rgDownloadQuality;
       qualityMode = mode === 'sd' || mode === 'both' ? mode : 'hd';
@@ -241,6 +244,7 @@ export default defineContentScript({
     });
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
+      if (changes.rgPremium) premium = changes.rgPremium.newValue === true;
       if (changes.rgLanguage) language = changes.rgLanguage.newValue === 'es' ? 'es' : 'en';
       if (changes.rgDownloadQuality) {
         const mode = changes.rgDownloadQuality.newValue;

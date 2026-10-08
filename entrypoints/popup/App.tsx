@@ -3,6 +3,7 @@ import type { LinkRow } from '../../utils/links-db';
 import type { ExportFormat, GridSelectionItem, RgRequest, RgResponse } from '../../utils/messages';
 import { DEFAULT_DOWNLOAD_OPTIONS, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../../utils/download-options';
 import { popupMessage, type PopupLanguage } from '../../utils/popup-i18n';
+import type { LicenseState } from '../../utils/license';
 
 async function send(request: RgRequest, language: PopupLanguage): Promise<RgResponse> {
   try {
@@ -72,6 +73,9 @@ export default function App() {
   const [downloadOptions, setDownloadOptions] = useState<DownloadOptions>(DEFAULT_DOWNLOAD_OPTIONS);
   const [originalFilenameEnabled, setOriginalFilenameEnabled] = useState(true);
   const [language, setLanguage] = useState<PopupLanguage>('en');
+  const [license, setLicense] = useState<LicenseState | null>(null);
+  const [licenseOpen, setLicenseOpen] = useState(false);
+  const premium = license?.premium === true;
   const t = (key: Parameters<typeof popupMessage>[1], values?: Record<string, string | number>) => popupMessage(language, key, values);
 
   useEffect(() => {
@@ -85,6 +89,69 @@ export default function App() {
       document.documentElement.lang = savedLanguage;
     });
   }, []);
+
+  async function loadLicense(refresh = false) {
+    const res = await send({ type: 'RG_LICENSE_GET', refresh }, language);
+    if (res.ok && res.license) {
+      setLicense(res.license);
+      return res.license;
+    }
+    return null;
+  }
+
+  useEffect(() => {
+    // Primero lo que hay en caché (rápido); si la solicitud sigue pendiente,
+    // preguntamos de inmediato al servidor para reflejar la aprobación.
+    void loadLicense(false).then(current => {
+      if (current && !current.premium && current.status === 'pending') void loadLicense(true);
+    });
+  }, []);
+
+  async function handleCheckLicense() {
+    setBusy(true);
+    const current = await loadLicense(true);
+    if (current) setStatus({ text: licenseStatusText(current), kind: current.premium ? 'ok' : 'error' });
+    setBusy(false);
+  }
+
+  async function handleReleaseLicense() {
+    setBusy(true);
+    const res = await send({ type: 'RG_LICENSE_RELEASE' }, language);
+    if (res.ok && res.license) {
+      setLicense(res.license);
+      setStatus({ text: t('released'), kind: 'ok' });
+    } else if (!res.ok) {
+      setStatus({ text: t('selectionError', { error: res.error }), kind: 'error' });
+    }
+    setBusy(false);
+  }
+
+  async function handleCopyId() {
+    if (!license) return;
+    try {
+      await navigator.clipboard.writeText(license.installId);
+      setStatus({ text: t('copied'), kind: 'ok' });
+    } catch {
+      setStatus({ text: license.installId, kind: 'ok' });
+    }
+  }
+
+  function licenseStatusText(current: LicenseState): string {
+    switch (current.status) {
+      case 'approved': return current.exp ? `${t('statusApproved')} · ${t('premiumUntil', { date: new Date(current.exp * 1000).toLocaleDateString(language === 'es' ? 'es' : 'en') })}` : t('statusApproved');
+      case 'pending': return t('statusPending');
+      case 'revoked': return t('statusRevoked');
+      case 'released': return t('statusReleased');
+      case 'expired': return t('statusExpired');
+      case 'none': return t('statusNone');
+      default: return t('statusUnknown');
+    }
+  }
+
+  function lockedNotice() {
+    setStatus({ text: t('premiumOnly'), kind: 'error' });
+    setLicenseOpen(true);
+  }
 
   async function updateLanguage(next: PopupLanguage) {
     setLanguage(next);
@@ -271,6 +338,16 @@ export default function App() {
           <span style={{ marginLeft: 'auto', color: '#888' }}>{t('total', { count: links.length })}</span>
           <button
             type="button"
+            onClick={() => setLicenseOpen(value => !value)}
+            title={t('licenseTitle')}
+            aria-label={t('licenseTitle')}
+            aria-expanded={licenseOpen}
+            style={{ background: premium ? '#2b4d1f' : licenseOpen ? '#454545' : 'transparent', border: '1px solid ' + (premium ? '#00ff00' : '#555'), borderRadius: 5, color: premium ? '#00ff00' : '#ddd', cursor: 'pointer', fontSize: 11, fontWeight: 'bold', lineHeight: 1, padding: '5px 7px' }}
+          >
+            ⭐ {premium ? t('planPremium') : t('planFree')}
+          </button>
+          <button
+            type="button"
             onClick={() => setSettingsOpen(value => !value)}
             title={t('settings')}
             aria-label={t('settings')}
@@ -280,6 +357,24 @@ export default function App() {
             ⚙
           </button>
         </div>
+        {licenseOpen && license && (
+          <div style={{ background: '#1c1c1c', border: '1px solid #444', borderRadius: 6, padding: '8px 10px', marginBottom: 8, color: '#ccc' }}>
+            <strong style={{ display: 'block', color: '#ddd', marginBottom: 6 }}>{t('licenseTitle')}: {premium ? t('planPremium') : t('planFree')}</strong>
+            <div style={{ marginBottom: 6 }}>{licenseStatusText(license)}</div>
+            <div style={{ color: '#999', marginBottom: 2 }}>{t('installId')}</div>
+            <code style={{ display: 'block', background: '#111', border: '1px solid #333', borderRadius: 4, padding: '4px 6px', marginBottom: 6, userSelect: 'all', wordBreak: 'break-all' }}>{license.installId}</code>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={() => void handleCopyId()} style={{ background: '#3a3a3a', color: '#ddd', border: '1px solid #555', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{t('copyId')}</button>
+              <button onClick={() => void handleCheckLicense()} disabled={busy} style={{ background: '#3a3a3a', color: '#ddd', border: '1px solid #555', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{t('checkStatus')}</button>
+              {!premium && (
+                <a href={`${license.site}/?id=${encodeURIComponent(license.installId)}&lang=${language}`} target="_blank" rel="noopener noreferrer" style={{ background: '#2f6bff', color: '#fff', borderRadius: 4, padding: '4px 8px', textDecoration: 'none', fontSize: 11 }}>{t('upgrade')}</a>
+              )}
+              {(premium || license.status === 'pending') && (
+                <button onClick={() => void handleReleaseLicense()} disabled={busy} style={{ background: 'transparent', color: '#ff8b8b', border: '1px solid #633', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{t('releaseLicense')}</button>
+              )}
+            </div>
+          </div>
+        )}
         {settingsOpen && (
           <div style={{ background: '#1c1c1c', border: '1px solid #444', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
             <strong style={{ display: 'block', color: '#ddd', marginBottom: 7 }}>{t('pageSettings')}</strong>
@@ -293,9 +388,15 @@ export default function App() {
             <div style={{ color: '#ccc', padding: '4px 0' }}>
               <strong style={{ display: 'block', fontWeight: 500, marginBottom: 2 }}>{t('downloadOptions')}</strong>
               {(['hd', 'sd', 'image', 'frame'] as const).map(choice => (
-                <label key={choice} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={downloadOptions[choice]} onChange={e => void updateDownloadOption(choice, e.target.checked)} />
+                <label key={choice} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: premium || choice === 'sd' ? 'pointer' : 'not-allowed', opacity: premium || choice === 'sd' ? 1 : 0.65 }}>
+                  <input
+                    type="checkbox"
+                    checked={premium ? downloadOptions[choice] : choice === 'sd'}
+                    disabled={!premium}
+                    onChange={e => void updateDownloadOption(choice, e.target.checked)}
+                  />
                   {t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame')}
+                  {!premium && choice !== 'sd' && <span onClick={lockedNotice} style={{ marginLeft: 'auto', color: '#e8c547' }}>{t('premiumLocked')}</span>}
                 </label>
               ))}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: 'pointer' }}>
@@ -315,10 +416,11 @@ export default function App() {
           </div>
         )}
         <button
-          onClick={() => void handleToggleGridSelect()}
+          onClick={() => (premium || gridSelectMode ? void handleToggleGridSelect() : lockedNotice())}
           style={{
             width: '100%',
             marginBottom: 8,
+            opacity: premium || gridSelectMode ? 1 : 0.65,
             background: gridSelectMode ? '#00ff00' : '#3a3a3a',
             color: gridSelectMode ? '#000' : '#ddd',
             border: '1px solid ' + (gridSelectMode ? '#00ff00' : '#555'),
@@ -334,7 +436,7 @@ export default function App() {
               ? savedCount > 0
               ? t('selectPendingSaved', { pending: pendingCount, saved: savedCount })
               : t('selectActive', { count: pendingCount })
-            : t('selectPage')}
+            : `${premium ? '' : '🔒 '}${t('selectPage')}`}
         </button>
         {gridSelectMode && selection.length > 0 && (
           <div
@@ -541,22 +643,22 @@ export default function App() {
             {t('refresh')}
           </button>
           <button
-            onClick={() => void handleDownloadAll()}
+            onClick={() => (premium ? void handleDownloadAll() : lockedNotice())}
             disabled={busy || links.length === 0}
             style={{ flex: 1, background: '#2f6bff', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 0', cursor: 'pointer', fontFamily: 'inherit' }}
           >
-            {t('downloadAll')}
+            {premium ? '' : '🔒 '}{t('downloadAll')}
           </button>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {EXPORT_FORMATS.map(([format, label]) => (
             <button
               key={format}
-              onClick={() => void handleExport(format)}
+              onClick={() => (premium ? void handleExport(format) : lockedNotice())}
               disabled={busy}
               style={{ flex: 1, background: '#3a3a3a', color: '#ddd', border: '1px solid #555', borderRadius: 4, padding: '4px 0', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit' }}
             >
-              {label}
+              {premium ? '' : '🔒 '}{label}
             </button>
           ))}
         </div>

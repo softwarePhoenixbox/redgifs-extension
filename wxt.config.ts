@@ -1,16 +1,17 @@
 import { defineConfig } from 'wxt';
+import { LICENSE_SITE } from './utils/license-config';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
   manifest: {
     name: 'RedGifs Extension',
-    version: '0.1.53',
+    version: '0.1.54',
     permissions: ['activeTab', 'storage', 'downloads'],
-    host_permissions: ['https://api.redgifs.com/*', 'https://media.redgifs.com/*', 'https://reddit.com/*', 'https://*.reddit.com/*'],
+    host_permissions: ['https://api.redgifs.com/*', 'https://media.redgifs.com/*', 'https://reddit.com/*', 'https://*.reddit.com/*', `${new URL(LICENSE_SITE).origin}/*`],
     browser_specific_settings: {
       gecko: {
-        // La extensión solo guarda los GIF elegidos localmente; no recopila ni transmite datos personales.
-        data_collection_permissions: { required: ['none'] },
+        // Los GIF guardados quedan en local. Solo se envía al servidor de licencias el ID aleatorio de la instalación (el email se escribe en la web de canje, no en la extensión).
+        data_collection_permissions: { required: ['technicalAndInteraction'] },
       },
     },
     // host_permissions: ['*://*.ejemplo.com/*'],   // sitios que la extensión puede leer o modificar

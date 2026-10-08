@@ -2,6 +2,7 @@
 // (background.ts).
 
 import type { LinkRow } from './links-db';
+import type { LicenseState } from './license';
 
 export type ExportFormat = 'sqlite' | 'db' | 'xlsx' | 'html';
 
@@ -70,6 +71,9 @@ export type RgRequest =
   | { type: 'RG_LIST_LINKS' }
   | { type: 'RG_DELETE_LINK'; id: string }
   | { type: 'RG_DOWNLOAD_ALL' }
+  // Licencia: el popup consulta/refresca el estado y puede liberar su cupo.
+  | { type: 'RG_LICENSE_GET'; refresh?: boolean }
+  | { type: 'RG_LICENSE_RELEASE' }
   // Popup -> content script: activa/desactiva el modo selección múltiple
   // en la grilla de thumbnails (perfiles, tags). No pasa por el background.
   | { type: 'RG_TOGGLE_GRID_SELECT'; enabled?: boolean }
@@ -121,5 +125,6 @@ export type RgResponse =
       pending_count?: number; // RG_GET_GRID_SELECT_STATE (marcados que todavía no se guardaron)
       saved_count?: number; // RG_GET_GRID_SELECT_STATE (marcados que ya se guardaron en esta sesión)
       selection?: GridSelectionItem[]; // RG_LIST_GRID_SELECTION
+      license?: LicenseState; // RG_LICENSE_GET, RG_LICENSE_RELEASE
     }
   | { ok: false; error: string };

@@ -1,6 +1,6 @@
 import type { ExportFormat, RgRequest, RgResponse } from '../utils/messages';
 import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
-import { DEFAULT_DOWNLOAD_OPTIONS, enabledDownloadChoices, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../utils/download-options';
+import { DEFAULT_DOWNLOAD_OPTIONS, effectiveDownloadOptions, enabledDownloadChoices, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../utils/download-options';
 
 export default defineContentScript({
   matches: ['*://*.redgifs.com/*'],
@@ -238,6 +238,8 @@ export default defineContentScript({
     let panelEnabled = false;
     let downloadActionEnabled = true;
     let downloadOptions: DownloadOptions = DEFAULT_DOWNLOAD_OPTIONS;
+    // Solo para mostrar las opciones correctas; el background es quien decide.
+    let premium = false;
     let originalFilenameEnabled = true;
     const pendingRedditMenuChoices = new Map<string, (choice: DownloadChoice) => void>();
 
@@ -431,7 +433,7 @@ export default defineContentScript({
     }
 
     function requestDownloadChoice(anchor: HTMLElement, action: (choice: DownloadChoice) => void): void {
-      const choices = enabledDownloadChoices(downloadOptions);
+      const choices = enabledDownloadChoices(effectiveDownloadOptions(downloadOptions, premium));
       const ancestors = Array.from((location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins ?? []);
       const embeddedInReddit = ancestors.some(origin => {
         try { return /(^|\.)reddit\.com$/i.test(new URL(origin).hostname); } catch { return false; }
@@ -1463,7 +1465,9 @@ export default defineContentScript({
         DOWNLOAD_OPTIONS_KEY,
         ORIGINAL_FILENAME_KEY,
         LANGUAGE_KEY,
+        'rgPremium',
       ]);
+      premium = stored.rgPremium === true;
       autoSave = stored[AUTO_SAVE_KEY] === true;
       autoSaveMinViews = typeof stored[AUTO_SAVE_MIN_VIEWS_KEY] === 'number' ? stored[AUTO_SAVE_MIN_VIEWS_KEY] : 0;
       panelPositionIdx = typeof stored[PANEL_POSITION_KEY] === 'number' ? stored[PANEL_POSITION_KEY] : 0;
@@ -1515,6 +1519,7 @@ export default defineContentScript({
       } else if (changes[DOWNLOAD_QUALITY_KEY] && !changes[DOWNLOAD_OPTIONS_KEY]) {
         downloadOptions = normalizeDownloadOptions(undefined, changes[DOWNLOAD_QUALITY_KEY].newValue);
       }
+      if (changes.rgPremium) premium = changes.rgPremium.newValue === true;
       if (changes[ORIGINAL_FILENAME_KEY]) originalFilenameEnabled = changes[ORIGINAL_FILENAME_KEY].newValue !== false;
       if (changes[LANGUAGE_KEY]) {
         language = changes[LANGUAGE_KEY].newValue === 'es' ? 'es' : 'en';

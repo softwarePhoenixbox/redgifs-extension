@@ -24,6 +24,13 @@ export function normalizeDownloadOptions(value: unknown, legacyQuality?: unknown
   return DEFAULT_DOWNLOAD_OPTIONS;
 }
 
+// Plan gratuito: solo video SD. HD, JPG y captura de fotograma son premium.
+export const FREE_DOWNLOAD_OPTIONS: DownloadOptions = { hd: false, sd: true, image: false, frame: false };
+
+export function effectiveDownloadOptions(options: DownloadOptions, premium: boolean): DownloadOptions {
+  return premium ? options : FREE_DOWNLOAD_OPTIONS;
+}
+
 export function enabledDownloadChoices(options: DownloadOptions): DownloadChoice[] {
   return (['hd', 'sd', 'image', 'frame'] as const).filter(choice => options[choice]);
 }
