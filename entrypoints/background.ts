@@ -1,4 +1,5 @@
 import { premium } from '@premium';
+import { HAS_PREMIUM } from '../utils/edition';
 import { embedMp4Metadata } from '../utils/mp4-metadata';
 import {
   deleteLink,
@@ -483,6 +484,8 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
       // Gratis: solo SD. Cualquier otra calidad (hd por defecto, image) es premium.
+      // En `basic` solo existe SD: cualquier otra calidad se rechaza (no hay código HD/JPG).
+      if (!HAS_PREMIUM && msg.quality !== 'sd') throw new Error('Not available in the basic edition');
       if ((msg.quality ?? 'hd') !== 'sd') await requirePremium();
       console.info('[RG Scroller] Nombre final enviado a Downloads', {
         requested: msg.filename ?? null,
@@ -500,6 +503,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       };
     }
     case 'RG_DOWNLOAD_FRAME': {
+      if (!HAS_PREMIUM) throw new Error('Not available in the basic edition');
       await requirePremium();
       return { ok: true, downloadId: await startFrameDownload(msg) };
     }
@@ -521,6 +525,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       return { ok: true, inserted, total };
     }
     case 'RG_SAVE_BULK': {
+      if (!HAS_PREMIUM) throw new Error('Not available in the basic edition');
       await requirePremium();
       const { inserted, updated, total } = await premium.saveBulk(msg.links, premiumDeps);
       return { ok: true, inserted_count: inserted, updated_count: updated, total };
@@ -534,6 +539,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     case 'RG_DELETE_LINK':
       return { ok: true, total: await deleteLink(msg.id) };
     case 'RG_DOWNLOAD_ALL': {
+      if (!HAS_PREMIUM) throw new Error('Not available in the basic edition');
       await requirePremium();
       const { queued, failed, withoutMetadata } = await premium.downloadAll(premiumDeps);
       return { ok: true, queued, failed, without_metadata: withoutMetadata };
@@ -543,6 +549,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       return { ok: true, imported, updated, total };
     }
     case 'RG_EXPORT_DB': {
+      if (!HAS_PREMIUM) throw new Error('Not available in the basic edition');
       await requirePremium();
       const file = await premium.exportLinks(msg.format, msg.language ?? 'en');
       return { ok: true, ...file };

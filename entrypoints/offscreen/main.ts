@@ -1,3 +1,4 @@
+import { HAS_PREMIUM } from '../../utils/edition';
 import { embedMp4Metadata } from '../../utils/mp4-metadata';
 import type { RgRequest, RgResponse } from '../../utils/messages';
 
@@ -10,7 +11,7 @@ browser.runtime.onMessage.addListener((message: RgRequest, _sender, sendResponse
   // Important: runtime.sendMessage broadcasts to every extension page.
   // Ignore unrelated messages synchronously so this offscreen document
   // cannot race the background listener with an empty Promise response.
-  if (message.type === 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB') {
+  if (HAS_PREMIUM && message.type === 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB') {
     try {
       const bytes = Uint8Array.from(atob(message.base64), character => character.charCodeAt(0));
       const blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));

@@ -1,3 +1,4 @@
+import { HAS_PREMIUM } from './edition';
 export type DownloadChoice = 'hd' | 'sd' | 'image' | 'frame';
 
 export interface DownloadOptions {
@@ -24,6 +25,14 @@ export function normalizeDownloadOptions(value: unknown, legacyQuality?: unknown
   return DEFAULT_DOWNLOAD_OPTIONS;
 }
 
+// Plan gratuito: solo video SD. HD, JPG y captura de fotograma son premium.
+export const FREE_DOWNLOAD_OPTIONS: DownloadOptions = { hd: false, sd: true, image: false, frame: false };
+
+export function effectiveDownloadOptions(options: DownloadOptions, premium: boolean): DownloadOptions {
+  return HAS_PREMIUM && premium ? options : FREE_DOWNLOAD_OPTIONS;
+}
+
 export function enabledDownloadChoices(options: DownloadOptions): DownloadChoice[] {
+  if (!HAS_PREMIUM) return options.sd ? ['sd'] : [];
   return (['hd', 'sd', 'image', 'frame'] as const).filter(choice => options[choice]);
 }

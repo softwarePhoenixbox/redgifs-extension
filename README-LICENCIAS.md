@@ -289,7 +289,16 @@ Cómo se separa el código:
 - En `basic` el manifest no incluye el host del servidor de licencias y declara `data_collection_permissions: none`.
 - Verificación: compara tamaños y busca marcas en el bundle, busca una cadena que solo exista en el código premium (p. ej. el nombre de archivo de una exportación): `grep -o "<cadena>" .output/chrome-mv3-basic/background.js` debe dar 0 coincidencias en basic y al menos 1 en premium/activated.
 
-**Lo que sí y no separa:** la exportación, la descarga masiva y el guardado en lote desaparecen del paquete `basic`. HD, JPG y captura de frame comparten código con la descarga normal (`startVideoDownload`), así que en `basic` quedan inertes (el background las rechaza y el popup no las muestra), pero su código sigue en el paquete. Para sacarlas también habría que extraer esas ramas a `premium/`.
+**Código premium fuera del build `basic` (constante de compilación):** además de `premium/`, todo lo premium que comparte archivos con las funciones normales (HD, JPG, captura de frame, selección en página, botones de exportar) se protege con `HAS_PREMIUM` (`utils/edition.ts`: `import.meta.env.WXT_EDITION !== 'basic'`). Cada rama va como `if (HAS_PREMIUM && ...)`. En `basic` vale `false`, el bundler elimina esas ramas y las funciones que solo ellas usaban (canvas/`toDataURL`, `RG_OFFSCREEN_PREPARE_IMAGE_BLOB`, exportadores, guardado en lote, `/api/consume`, etc.). Reglas para otra extensión: (1) toda función premium se llama solo desde un `if (HAS_PREMIUM)`; (2) no la dejes referenciada desde código que siempre corre; (3) los `addEventListener` de UI premium también van dentro del `if`; (4) verifica siempre con grep sobre `.output/chrome-mv3-basic` (comando abajo). Quedan solo textos/identificadores sueltos (nombres de mensajes en el `switch` del background que responden "Not available in the basic edition", etiquetas i18n), sin lógica.
+
+Verificación del build basic (PowerShell; debe dar 0 en todo salvo etiquetas):
+
+```powershell
+pnpm build:basic
+foreach ($p in 'toDataURL','image/jpeg','RG_OFFSCREEN_PREPARE_IMAGE','api/consume','sheet.xml') {
+  "$p : " + (Get-ChildItem .output\chrome-mv3-basic -Recurse -Filter *.js | Select-String -SimpleMatch $p -List).Count
+}
+```
 
 ### 6.2 Repositorio privado para `premium/`
 

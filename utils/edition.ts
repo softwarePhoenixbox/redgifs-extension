@@ -6,4 +6,6 @@
 export type Edition = 'basic' | 'premium' | 'activated';
 
 const raw = import.meta.env.WXT_EDITION as string | undefined;
+// Constante de compilación: en `basic` vale false y el bundler elimina todo el código bajo `if (HAS_PREMIUM)`.
+export const HAS_PREMIUM: boolean = import.meta.env.WXT_EDITION !== 'basic';
 export const EDITION: Edition = raw === 'basic' || raw === 'activated' ? raw : 'premium';

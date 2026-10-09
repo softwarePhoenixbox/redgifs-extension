@@ -4,7 +4,7 @@ import type { ExportFormat, GridSelectionItem, RgRequest, RgResponse } from '../
 import { DEFAULT_DOWNLOAD_OPTIONS, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../../utils/download-options';
 import { popupMessage, type PopupLanguage } from '../../utils/popup-i18n';
 import type { LicenseState } from '../../utils/license';
-import { EDITION } from '../../utils/edition';
+import { EDITION, HAS_PREMIUM } from '../../utils/edition';
 
 async function send(request: RgRequest, language: PopupLanguage): Promise<RgResponse> {
   try {
@@ -76,7 +76,7 @@ export default function App() {
   const [language, setLanguage] = useState<PopupLanguage>('en');
   const [license, setLicense] = useState<LicenseState | null>(null);
   const [licenseOpen, setLicenseOpen] = useState(false);
-  const basicEdition = EDITION === 'basic';
+  const basicEdition = !HAS_PREMIUM;
   const licensedEdition = EDITION === 'premium';
   const [keyInput, setKeyInput] = useState('');
   // Con usos agotados la licencia sigue válida pero no habilita funciones premium.

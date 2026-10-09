@@ -1,0 +1,6 @@
+ACTUALIZACION v3 - basic sin codigo premium
+
+Copia sobre tu proyecto (reemplaza): entrypoints/, utils/, premium/, stubs/, wxt.config.ts
+(No incluye package.json ni .env). Luego: pnpm build:basic / build:premium / build:activated
+Borra utils/exporters.ts si aun existe.
+En basic ya no existe codigo de HD, JPG, captura de frame, exportar, descargar todo ni seleccion en pagina.
