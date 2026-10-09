@@ -13,7 +13,13 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "build:basic": "wxt build --mode basic",
+    "build:premium": "wxt build --mode premium",
+    "build:activated": "wxt build --mode activated",
+    "build:all": "pnpm build:basic && pnpm build:premium && pnpm build:activated",
+    "zip:basic": "wxt zip --mode basic",
+    "zip:premium": "wxt zip --mode premium"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",

@@ -1,9 +1,7 @@
-import { buildHtml, buildXlsx } from '../utils/exporters';
+import { premium } from '@premium';
 import { embedMp4Metadata } from '../utils/mp4-metadata';
 import {
-  bytesToBase64,
   deleteLink,
-  exportDbBase64,
   getTotal,
   importDb,
   linkExists,
@@ -11,6 +9,8 @@ import {
   saveLink,
 } from '../utils/links-db';
 import type { RgRequest, RgResponse } from '../utils/messages';
+import { activateWithKey, authorizePremiumAction, getInstallId, readLicense, refreshLicense, releaseLicense } from '../utils/license';
+import type { PremiumDeps } from '../utils/premium-api';
 
 const ID_RE = /^[\w-]+$/;
 const REDGIFS_API = 'https://api.redgifs.com/v2';
@@ -457,14 +457,33 @@ async function startVideoDownload(
   }
 }
 
+// Autoridad del plan: toda función premium se valida AQUÍ, no en el popup ni
+// en los content scripts (que solo ocultan/bloquean controles por comodidad).
+// Según la edición: basic rechaza, activated permite, premium exige licencia y descuenta usos si aplica.
+const requirePremium = authorizePremiumAction;
+
+const premiumDeps: PremiumDeps = {
+  isRedgifsUrl,
+  idPattern: ID_RE,
+  startVideoDownload: (id, url, metadata) => startVideoDownload(id, url, metadata),
+};
+
 async function handle(msg: RgRequest): Promise<RgResponse> {
   switch (msg.type) {
+    case 'RG_LICENSE_GET':
+      return { ok: true, license: msg.refresh ? await refreshLicense(true) : await refreshLicense(false) };
+    case 'RG_LICENSE_RELEASE':
+      return { ok: true, license: await releaseLicense() };
+    case 'RG_LICENSE_ACTIVATE':
+      return { ok: true, license: await activateWithKey(msg.key) };
     case 'RG_RESOLVE_GIF': {
       if (!ID_RE.test(msg.id)) throw new Error('ID de RedGifs inválido');
       return resolveRedgifsGif(msg.id);
     }
     case 'RG_DOWNLOAD': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
+      // Gratis: solo SD. Cualquier otra calidad (hd por defecto, image) es premium.
+      if ((msg.quality ?? 'hd') !== 'sd') await requirePremium();
       console.info('[RG Scroller] Nombre final enviado a Downloads', {
         requested: msg.filename ?? null,
         filename: downloadFilename(msg.id, msg.url, msg.quality, msg.filename, msg.useOriginalFilename),
@@ -481,6 +500,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       };
     }
     case 'RG_DOWNLOAD_FRAME': {
+      await requirePremium();
       return { ok: true, downloadId: await startFrameDownload(msg) };
     }
     case 'RG_SAVE_LINK': {
@@ -501,30 +521,9 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       return { ok: true, inserted, total };
     }
     case 'RG_SAVE_BULK': {
-      // Guarda varios links de una (selección múltiple en una grilla de
-      // tags/usuario). Reutiliza saveLink() uno por uno -> la cola interna
-      // de links-db.ts ya serializa los writes, así que esto es seguro
-      // aunque se dispare junto con otros guardados.
-      let insertedCount = 0;
-      let updatedCount = 0;
-      for (const link of msg.links) {
-        if (!ID_RE.test(link.id) || !isRedgifsUrl(link.url)) continue;
-        if (link.imageUrl && !isRedgifsUrl(link.imageUrl)) continue;
-        const { inserted } = await saveLink({
-          gifId: link.id,
-          url: link.url,
-          imageUrl: link.imageUrl,
-          pageUrl: link.pageUrl,
-          title: link.title,
-          author: link.author,
-          tags: link.tags,
-          views: link.views,
-          likes: link.likes,
-        });
-        if (inserted) insertedCount++;
-        else updatedCount++;
-      }
-      return { ok: true, inserted_count: insertedCount, updated_count: updatedCount, total: await getTotal() };
+      await requirePremium();
+      const { inserted, updated, total } = await premium.saveBulk(msg.links, premiumDeps);
+      return { ok: true, inserted_count: inserted, updated_count: updated, total };
     }
     case 'RG_STATS':
       return { ok: true, total: await getTotal() };
@@ -535,68 +534,28 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
     case 'RG_DELETE_LINK':
       return { ok: true, total: await deleteLink(msg.id) };
     case 'RG_DOWNLOAD_ALL': {
-      // Descarga en batch todo lo guardado. Ojo: las URLs vienen firmadas
-      // por la API de RedGifs y pueden vencer con el tiempo, así que un
-      // link viejo puede fallar acá aunque haya sido válido al guardarlo.
-      const links = await listLinks();
-      let queued = 0;
-      let failed = 0;
-      let withoutMetadata = 0;
-      for (const link of links) {
-        if (!isRedgifsUrl(link.url)) {
-          failed++;
-          continue;
-        }
-        try {
-          const result = await startVideoDownload(link.gifId, link.url, {
-            title: link.title,
-            author: link.author,
-            tags: link.tags,
-            pageUrl: link.pageUrl,
-          });
-          queued++;
-          if (!result.metadataEmbedded) withoutMetadata++;
-        } catch {
-          failed++;
-        }
-      }
+      await requirePremium();
+      const { queued, failed, withoutMetadata } = await premium.downloadAll(premiumDeps);
       return { ok: true, queued, failed, without_metadata: withoutMetadata };
     }
     case 'RG_IMPORT_DB': {
       const { imported, updated, total } = await importDb(base64ToBytes(msg.base64));
       return { ok: true, imported, updated, total };
     }
-    case 'RG_EXPORT_DB':
-      switch (msg.format) {
-        case 'sqlite':
-          return { ok: true, base64: await exportDbBase64(), filename: 'redgifs-links.sqlite', mime: 'application/vnd.sqlite3' };
-        case 'db':
-          return { ok: true, base64: await exportDbBase64(), filename: 'redgifs-links.db', mime: 'application/octet-stream' };
-        case 'xlsx':
-          return {
-            ok: true,
-            base64: bytesToBase64(buildXlsx(await listLinks(), msg.language ?? 'en')),
-            filename: 'redgifs-links.xlsx',
-            mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          };
-        case 'html': {
-          const html = await buildHtml(await listLinks(), msg.language ?? 'en');
-          return {
-            ok: true,
-            base64: bytesToBase64(new TextEncoder().encode(html)),
-            filename: 'redgifs-links.html',
-            mime: 'text/html;charset=utf-8',
-          };
-        }
-        default:
-          throw new Error('Formato desconocido');
-      }
+    case 'RG_EXPORT_DB': {
+      await requirePremium();
+      const file = await premium.exportLinks(msg.format, msg.language ?? 'en');
+      return { ok: true, ...file };
+    }
     default:
       throw new Error('Mensaje desconocido');
   }
 }
 
 export default defineBackground(() => {
+  // Crea el installId en la instalación y deja el estado de licencia al día.
+  void getInstallId().then(() => readLicense()).catch(() => undefined);
+  void browser.runtime.onInstalled.addListener(() => void getInstallId().catch(() => undefined));
   browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
     if (message.type === 'RG_REDDIT_MENU_OPEN') {
       const tabId = sender.tab?.id;

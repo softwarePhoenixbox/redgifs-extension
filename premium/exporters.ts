@@ -1,6 +1,6 @@
 import { zipSync, strToU8 } from 'fflate';
-import { bytesToBase64, type LinkRow } from './links-db';
-import { popupMessage, type PopupLanguage } from './popup-i18n';
+import { bytesToBase64, type LinkRow } from '../utils/links-db';
+import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
 
 // ---------- Utilidades ----------
 function escapeXml(value: string): string {
