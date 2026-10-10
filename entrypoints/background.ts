@@ -32,11 +32,11 @@ let creatingOffscreenDocument: Promise<void> | null = null;
 // that event too, and keep the URL/name pair only while Chrome resolves it.
 try {
   browser.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    // Descarga de otra extensión o del usuario: no tocarla. Se sale SIN llamar a suggest():
+    // suggest() sin argumentos fija el nombre actual (vacío en data:/blob:) y le gana a la otra extensión.
+    if (item.byExtensionId !== browser.runtime.id) return;
     const pending = pendingFilenameSuggestions.get(item.url);
-    if (!pending) {
-      suggest();
-      return;
-    }
+    if (!pending) return;
     clearTimeout(pending.timeout);
     pendingFilenameSuggestions.delete(item.url);
     console.info('[RG Scroller] Sugiriendo nombre final a Chrome', {
