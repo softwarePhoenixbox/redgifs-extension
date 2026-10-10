@@ -1,0 +1,19 @@
+name: docs
+on:
+  pull_request:
+    paths: ['docs/**', 'scripts/docs/**', 'package.json', 'pnpm-lock.yaml']
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i -g pnpm@12.5.1
+      - run: pnpm install --frozen-lockfile
+      - name: Regenerar y comprobar que no hay diferencias
+        run: |
+          node scripts/docs/gen-deps.mjs
+          git diff --exit-code -- docs/06-dependencies/index.md docs/00-overview/tech-stack.md || (echo "Ejecuta node scripts/docs/gen-deps.mjs y confirma el resultado"; exit 1)
+      - name: Enlaces y frescura
+        run: node scripts/docs/check-docs.mjs --strict

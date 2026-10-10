@@ -27,28 +27,9 @@ const pendingFilenameSuggestions = new Map<string, { filename: string; timeout: 
 const pendingRedditMenuTargets = new Map<string, { tabId: number; frameId: number }>();
 let creatingOffscreenDocument: Promise<void> | null = null;
 
-// Chrome ignores DownloadOptions.filename when another extension has a
-// downloads.onDeterminingFilename listener. Suggest our explicit target from
-// that event too, and keep the URL/name pair only while Chrome resolves it.
-try {
-  browser.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    // Descarga de otra extensión o del usuario: no tocarla. Se sale SIN llamar a suggest():
-    // suggest() sin argumentos fija el nombre actual (vacío en data:/blob:) y le gana a la otra extensión.
-    if (item.byExtensionId !== browser.runtime.id) return;
-    const pending = pendingFilenameSuggestions.get(item.url);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    pendingFilenameSuggestions.delete(item.url);
-    console.info('[RG Scroller] Sugiriendo nombre final a Chrome', {
-      url: item.url,
-      currentFilename: item.filename,
-      requestedFilename: pending.filename,
-    });
-    suggest({ filename: pending.filename, conflictAction: 'uniquify' });
-  });
-} catch {
-  // Older browser implementations may not expose onDeterminingFilename.
-}
+// No se registra onDeterminingFilename a propósito: Chrome solo deja decidir el nombre final a UNA extensión
+// (gana la instalada más recientemente, aunque no sugiera nada), así que un listener aquí pisa los nombres
+// de las demás extensiones. downloads.download({ filename }) ya basta cuando ninguna lo registra.
 
 function chromeOffscreenApi(): ChromeOffscreenApi | undefined {
   return (globalThis as typeof globalThis & { chrome?: { offscreen?: ChromeOffscreenApi } }).chrome?.offscreen;
