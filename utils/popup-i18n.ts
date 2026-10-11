@@ -1,6 +1,7 @@
 export type PopupLanguage = 'en' | 'es';
 
-const messages = {
+// Textos comunes (basic + premium + activated).
+const common = {
   en: {
     savedLinks: 'Saved links', total: '{count} total', settings: 'Settings', pageSettings: 'Page settings', language: 'Language',
     showPanel: 'Show “On-screen video” panel', showDownloadAction: 'Show download icon beside video actions',
@@ -33,8 +34,7 @@ const messages = {
     videoLinkError: 'Error: use the Video link ({error})', tableTitle: 'Title', tableAuthor: 'Author', tableTags: 'Tags', tableViews: 'Views',
     tableVideo: 'Video', tableDate: 'Date', tableDownload: 'Download', metadataButton: '⬇ With metadata',
     metadataInstructions: '“With metadata” embeds title, author, and tags in the MP4. To populate the URL column, download the shortcut as .url.txt and rename it to .url; Chrome protects direct .url downloads.',
-    saving: 'Saving…', savingDatabase: 'Saving to the database…', selectedCount: '{count} selected', importCounts: '✔ {imported} new, {updated} updated',
-    downloadQuality: 'Download quality', downloadOptions: 'Download files', downloadOptionsHint: 'With multiple choices enabled, the download button asks which file to save.', originalFilename: 'Use original RedGifs filenames', noDownloadOptions: 'Enable at least one download type in Settings.', qualityHd: 'HD', qualitySd: 'SD', qualityBoth: 'Both (choose each time)', downloadHd: 'HD video', downloadSd: 'SD video', downloadImage: 'JPG image', downloadFrame: 'Capture frame', captureFrameStarted: 'Current frame download started', redditDownload: 'Download', redditImage: 'JPG image', redditAuthor: 'Posted by', imageDownloadStarted: 'JPG image download started',
+    saving: 'Saving…', savingDatabase: 'Saving to the database…', selectedCount: '{count} selected', importCounts: '✔ {imported} new, {updated} updated', downloadOptions: 'Download files', downloadOptionsHint: 'With multiple choices enabled, the download button asks which file to save.', originalFilename: 'Use original RedGifs filenames', noDownloadOptions: 'Enable at least one download type in Settings.', downloadSd: 'SD video',
     planFree: 'Free plan', planPremium: 'Premium', upgrade: '⭐ Get Premium', licenseTitle: 'License', installId: 'Your ID', copyId: 'Copy ID', copied: '✔ ID copied', checkStatus: '↻ Check status', releaseLicense: 'Release this install', released: '✔ Released; back to the free plan', statusNone: 'Not requested yet. Paste your ID on the Premium page.', statusPending: '⏳ Request received. Waiting for approval.', statusApproved: '✔ Premium active', statusRevoked: '✖ License revoked', statusReleased: 'Released', statusExpired: '⚠ License expired or could not be re-checked', statusUnknown: 'Could not reach the license server', premiumLocked: '🔒 Premium', premiumOnly: 'Premium feature. Open ⭐ to upgrade.', premiumUntil: 'Valid until {date}',
     licenseKey: 'License key', activate: 'Activate', usesLeft: '{count} uses left', usesUnlimited: 'Unlimited uses', activatedBuild: 'Premium (activated build)', activated: '✔ License activated', keyPlaceholder: 'XXXX-XXXX-XXXX', err_invalid_key: '✖ Invalid key', err_revoked: '✖ This license was revoked', err_expired: '✖ This license expired', err_activation_limit: '✖ This key already has all its installs in use. Release one from another install.', err_install_has_other_key: '✖ This install already uses another key. Release it first.', err_network: '✖ Could not reach the license server', err_bad_signature: '✖ The server approved you but this build has a different public key. Rebuild with the right key.', err_server: '✖ License server error ({code})',
   },
@@ -70,15 +70,55 @@ const messages = {
     videoLinkError: 'Error: usa el link Video ({error})', tableTitle: 'Título', tableAuthor: 'Autor', tableTags: 'Tags', tableViews: 'Vistas',
     tableVideo: 'Video', tableDate: 'Fecha', tableDownload: 'Descargar', metadataButton: '⬇ Con metadatos',
     metadataInstructions: '“Con metadatos” incrusta título, autor y tags en el MP4. Para la columna URL, descarga el acceso como .url.txt y renómbralo a .url; Chrome protege las descargas .url directas.',
-    saving: 'Guardando…', savingDatabase: 'Guardando en la base…', selectedCount: '{count} seleccionados', importCounts: '✔ {imported} nuevos, {updated} actualizados',
-    downloadQuality: 'Calidad de descarga', downloadOptions: 'Archivos para descargar', downloadOptionsHint: 'Con varias opciones activadas, el botón te preguntará cuál guardar.', originalFilename: 'Usar los nombres originales de RedGifs', noDownloadOptions: 'Activa al menos un tipo de descarga en Settings.', qualityHd: 'HD', qualitySd: 'SD', qualityBoth: 'Ambos (elegir cada vez)', downloadHd: 'Video HD', downloadSd: 'Video SD', downloadImage: 'Imagen JPG', downloadFrame: 'Capturar fotograma', captureFrameStarted: 'Se inició la descarga del fotograma actual', redditDownload: 'Descargar', redditImage: 'Imagen JPG', redditAuthor: 'Publicado por', imageDownloadStarted: 'Descarga de imagen JPG iniciada',
+    saving: 'Guardando…', savingDatabase: 'Guardando en la base…', selectedCount: '{count} seleccionados', importCounts: '✔ {imported} nuevos, {updated} actualizados', downloadOptions: 'Archivos para descargar', downloadOptionsHint: 'Con varias opciones activadas, el botón te preguntará cuál guardar.', originalFilename: 'Usar los nombres originales de RedGifs', noDownloadOptions: 'Activa al menos un tipo de descarga en Settings.', downloadSd: 'Video SD',
     planFree: 'Plan gratuito', planPremium: 'Premium', upgrade: '⭐ Obtener Premium', licenseTitle: 'Licencia', installId: 'Tu ID', copyId: 'Copiar ID', copied: '✔ ID copiado', checkStatus: '↻ Verificar estado', releaseLicense: 'Liberar esta instalación', released: '✔ Liberada; vuelves al plan gratuito', statusNone: 'Aún no solicitada. Pega tu ID en la página Premium.', statusPending: '⏳ Solicitud recibida. Esperando aprobación.', statusApproved: '✔ Premium activo', statusRevoked: '✖ Licencia revocada', statusReleased: 'Liberada', statusExpired: '⚠ Licencia vencida o no se pudo reverificar', statusUnknown: 'No se pudo contactar al servidor de licencias', premiumLocked: '🔒 Premium', premiumOnly: 'Función premium. Abre ⭐ para activarla.', premiumUntil: 'Válida hasta {date}',
     licenseKey: 'Clave de licencia', activate: 'Activar', usesLeft: 'Quedan {count} usos', usesUnlimited: 'Usos ilimitados', activatedBuild: 'Premium (build activado)', activated: '✔ Licencia activada', keyPlaceholder: 'XXXX-XXXX-XXXX', err_invalid_key: '✖ Clave inválida', err_revoked: '✖ Esta licencia fue revocada', err_expired: '✖ Esta licencia venció', err_activation_limit: '✖ Esta clave ya tiene todas sus instalaciones en uso. Libera una desde otra instalación.', err_install_has_other_key: '✖ Esta instalación ya usa otra clave. Libérala primero.', err_network: '✖ No se pudo contactar al servidor de licencias', err_bad_signature: '✖ El servidor te aprobó pero este build tiene otra clave pública. Recompila con la clave correcta.', err_server: '✖ Error del servidor de licencias ({code})',
   },
 } as const;
 
-type MessageKey = keyof typeof messages.en;
+// Textos de HD / JPG / fotograma. Solo se incluyen si la edición no es `basic`:
+// en `basic` el objeto no se compila: no queda ningún rastro en el paquete.
+// La condición va aquí mismo (no en otro archivo) para que el bundler la resuelva al compilar y elimine el objeto en basic.
+const premiumOnly = import.meta.env.WXT_EDITION === 'basic' ? undefined : {
+  en: {
+    redditDownload: 'Download',
+    redditAuthor: 'Posted by',
+    qualityHd: 'HD',
+    qualitySd: 'SD',
+    qualityBoth: 'Both (choose each time)',
+    downloadHd: 'HD video',
+    downloadImage: 'JPG image',
+    downloadFrame: 'Capture frame',
+    captureFrameStarted: 'Current frame download started',
+    redditImage: 'JPG image',
+    imageDownloadStarted: 'JPG image download started',
+    downloadQuality: 'Download quality',
+  },
+  es: {
+    redditDownload: 'Descargar',
+    redditAuthor: 'Publicado por',
+    qualityHd: 'HD',
+    qualitySd: 'SD',
+    qualityBoth: 'Ambos (elegir cada vez)',
+    downloadHd: 'Video HD',
+    downloadImage: 'Imagen JPG',
+    downloadFrame: 'Capturar fotograma',
+    captureFrameStarted: 'Se inició la descarga del fotograma actual',
+    redditImage: 'Imagen JPG',
+    imageDownloadStarted: 'Descarga de imagen JPG iniciada',
+    downloadQuality: 'Calidad de descarga',
+  },
+} as const;
+
+type PremiumTexts = { en: Record<string, string>; es: Record<string, string> };
+type MessageKey = keyof (typeof common)['en'] | 'redditDownload' | 'redditAuthor' | 'qualityHd' | 'qualitySd' | 'qualityBoth' | 'downloadHd' | 'downloadImage' | 'downloadFrame' | 'captureFrameStarted' | 'redditImage' | 'imageDownloadStarted' | 'downloadQuality';
+
+const messages: Record<PopupLanguage, Record<MessageKey, string>> = {
+  en: { ...common.en, ...((premiumOnly as PremiumTexts | undefined)?.en ?? {}) } as Record<MessageKey, string>,
+  es: { ...common.es, ...((premiumOnly as PremiumTexts | undefined)?.es ?? {}) } as Record<MessageKey, string>,
+};
 
 export function popupMessage(language: PopupLanguage, key: MessageKey, values: Record<string, string | number> = {}): string {
-  return messages[language][key].replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? `{${name}}`));
+  const text = messages[language][key] ?? key;
+  return text.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? `{${name}}`));
 }

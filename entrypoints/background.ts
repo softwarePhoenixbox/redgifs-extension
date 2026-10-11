@@ -178,7 +178,7 @@ async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> 
 
     const data = (await response.json()) as RedgifsGifResponse;
     const urls = data.gif?.urls;
-    const hdVideoUrl = urls?.hd && isRedgifsUrl(urls.hd) ? urls.hd : undefined;
+    const hdVideoUrl = HAS_PREMIUM && urls?.hd && isRedgifsUrl(urls.hd) ? urls.hd : undefined;
     const sdVideoUrl = urls?.sd && isRedgifsUrl(urls.sd) ? urls.sd : undefined;
     const videoUrl = hdVideoUrl ?? sdVideoUrl;
     if (!videoUrl || !isRedgifsUrl(videoUrl)) return { ok: true, not_found: true };
@@ -193,7 +193,7 @@ async function resolveRedgifsGif(id: string, retry = true): Promise<RgResponse> 
       ok: true,
       gif: {
         videoUrl,
-        hdVideoUrl,
+        ...(HAS_PREMIUM ? { hdVideoUrl } : {}),
         sdVideoUrl,
         imageUrl: isRedgifsUrl(imageUrl) ? imageUrl : videoUrl,
         metadata: {
@@ -278,7 +278,7 @@ function downloadFilename(id: string, url: string, quality?: 'hd' | 'sd' | 'imag
   let name = mediaUrl.pathname.split('/').filter(Boolean).at(-1) ?? '';
   try { name = decodeURIComponent(name); } catch { /* keep the encoded segment */ }
   if (!/^[\w-]+\.(?:mp4|m4v|jpg|jpeg|png)$/i.test(name)) {
-    const suffix = quality === 'sd' ? '-sd' : quality === 'image' ? '-image' : '';
+    const suffix = quality === 'sd' ? '-sd' : HAS_PREMIUM && quality === 'image' ? '-image' : '';
     name = `${id}${suffix}.${extensionOf(url)}`;
   }
   return `redgifs/${name}`;
@@ -467,11 +467,11 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
       // Gratis: solo SD. Cualquier otra calidad (hd por defecto, image) es premium.
       // En `basic` solo existe SD: cualquier otra calidad se rechaza (no hay código HD/JPG).
       if (!HAS_PREMIUM && msg.quality !== 'sd') throw new Error('Not available in the basic edition');
-      if ((msg.quality ?? 'hd') !== 'sd') await requirePremium();
+      if (HAS_PREMIUM && (msg.quality ?? 'hd') !== 'sd') await requirePremium();
       console.info('[RG Scroller] Nombre final enviado a Downloads', {
         requested: msg.filename ?? null,
         filename: downloadFilename(msg.id, msg.url, msg.quality, msg.filename, msg.useOriginalFilename),
-        quality: msg.quality ?? 'hd',
+        quality: HAS_PREMIUM ? (msg.quality ?? 'hd') : 'sd',
         useOriginalFilename: msg.useOriginalFilename ?? null,
       });
       // Descarga en el background y añade metadatos Xtra/QuickTime sin recodificar.
@@ -545,7 +545,7 @@ export default defineBackground(() => {
   void getInstallId().then(() => readLicense()).catch(() => undefined);
   void browser.runtime.onInstalled.addListener(() => void getInstallId().catch(() => undefined));
   browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
-    if (message.type === 'RG_REDDIT_MENU_OPEN') {
+    if (HAS_PREMIUM && message.type === 'RG_REDDIT_MENU_OPEN') {
       const tabId = sender.tab?.id;
       const frameId = sender.frameId;
       if (tabId === undefined || frameId === undefined || frameId === 0) {
@@ -566,7 +566,7 @@ export default defineBackground(() => {
       });
       return true;
     }
-    if (message.type === 'RG_REDDIT_MENU_SELECTED') {
+    if (HAS_PREMIUM && message.type === 'RG_REDDIT_MENU_SELECTED') {
       const target = pendingRedditMenuTargets.get(message.requestId);
       pendingRedditMenuTargets.delete(message.requestId);
       if (!target || sender.tab?.id !== target.tabId || sender.frameId !== 0) {

@@ -306,9 +306,14 @@ export default defineContentScript({
       return request;
     }
 
+    // basic: solo existe la URL SD; las ediciones con licencia prefieren la de mayor calidad.
+    function bestVideoUrl(result: ResolvedGif): string {
+      return HAS_PREMIUM ? (result.hdVideoUrl ?? result.videoUrl) : result.videoUrl;
+    }
+
     function mobileVideoUrl(result: ResolvedGif): string {
       if (result.sdVideoUrl) return result.sdVideoUrl;
-      const hd = result.hdVideoUrl ?? result.videoUrl;
+      const hd = bestVideoUrl(result);
       return hd.replace(/\.mp4(?=([?#]|$))/i, '-mobile.mp4');
     }
 
@@ -436,12 +441,12 @@ export default defineContentScript({
 
     function requestDownloadChoice(anchor: HTMLElement, action: (choice: DownloadChoice) => void): void {
       const choices = enabledDownloadChoices(effectiveDownloadOptions(downloadOptions, premium));
-      const ancestors = Array.from((location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins ?? []);
-      const embeddedInReddit = ancestors.some(origin => {
+      const ancestors = HAS_PREMIUM ? Array.from((location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins ?? []) : [];
+      const embeddedInReddit = HAS_PREMIUM && (ancestors.some(origin => {
         try { return /(^|\.)reddit\.com$/i.test(new URL(origin).hostname); } catch { return false; }
-      }) || /(^|\.)reddit\.com\//i.test(document.referrer);
+      }) || /(^|\.)reddit\.com\//i.test(document.referrer));
       const fullscreen = isFullscreenView();
-      if (choices.length > 1 && embeddedInReddit && !fullscreen) {
+      if (HAS_PREMIUM && choices.length > 1 && embeddedInReddit && !fullscreen) {
         const requestId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         pendingRedditMenuChoices.set(requestId, action);
         void send({ type: 'RG_REDDIT_MENU_OPEN', requestId, gifId: getActiveItem()?.id ?? '', choices }).then(response => {
@@ -513,7 +518,7 @@ export default defineContentScript({
       }
       const result = await getValidLink(id);
       if (result.kind !== 'ok') throw new Error(result.kind === 'error' ? result.message : t('videoUnavailable'));
-      const hdUrl = result.hdVideoUrl ?? result.videoUrl;
+      const hdUrl = bestVideoUrl(result);
       const url = !HAS_PREMIUM ? mobileVideoUrl(result)
         : choice === 'image'
           ? hdUrl.replace(/(?:-mobile)?\.mp4(?=([?#]|$))/i, '-mobile.jpg')
@@ -715,7 +720,7 @@ export default defineContentScript({
     }
 
     function renderResult(id: string, result: ResolvedGif, meta: ScrapedMeta, mediaRoot: HTMLElement | null): void {
-      const url = result.hdVideoUrl ?? result.videoUrl;
+      const url = bestVideoUrl(result);
       const imageUrl = result.imageUrl;
       const card = createEl(
         'div',
@@ -769,7 +774,7 @@ export default defineContentScript({
               setStatus(dlStatus, t('captureFrameStarted'), 'ok');
               return;
             }
-            const hdUrl = result.hdVideoUrl ?? result.videoUrl;
+            const hdUrl = bestVideoUrl(result);
             const selectedUrl = !HAS_PREMIUM ? mobileVideoUrl(result)
               : quality === 'image'
                 ? hdUrl.replace(/(?:-mobile)?\.mp4(?=([?#]|$))/i, '-mobile.jpg')
@@ -1238,7 +1243,7 @@ export default defineContentScript({
     // el modo selección. Se registra temprano para no perder el primer
     // toggle si el popup se abre apenas cargó la página.
     browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
-      if (message.type === 'RG_REDDIT_MENU_CHOOSE') {
+      if (HAS_PREMIUM && message.type === 'RG_REDDIT_MENU_CHOOSE') {
         const action = pendingRedditMenuChoices.get(message.requestId);
         pendingRedditMenuChoices.delete(message.requestId);
         if (action) {

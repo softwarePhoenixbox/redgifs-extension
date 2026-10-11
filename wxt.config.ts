@@ -17,7 +17,11 @@ function cliMode(): string {
   return inline ? inline.slice('--mode='.length) : i >= 0 ? (args[i + 1] ?? '') : '';
 }
 
+const isBasicBuild = cliMode() === 'basic';
+
 export default defineConfig({
+  // basic: sin el content script de Reddit (solo existe en premium y activated).
+  filterEntrypoints: isBasicBuild ? ['background', 'content', 'popup', 'offscreen'] : undefined,
   // basic → stubs públicos (sin lógica premium); cualquier otro modo → carpeta premium/.
   alias: { '@premium': cliMode() === 'basic' ? 'stubs/premium' : 'premium' },
   modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
@@ -28,8 +32,7 @@ export default defineConfig({
     host_permissions: [
       'https://api.redgifs.com/*',
       'https://media.redgifs.com/*',
-      'https://reddit.com/*',
-      'https://*.reddit.com/*',
+      ...(isBasicBuild ? [] : ['https://reddit.com/*', 'https://*.reddit.com/*']),
       // Solo la edición con licencia consulta al servidor.
       ...(isLicensed(mode) ? [`${new URL(LICENSE_SITE).origin}/*`] : []),
     ],

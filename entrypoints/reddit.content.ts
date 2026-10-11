@@ -136,7 +136,7 @@ export default defineContentScript({
       menu.id = 'rg-reddit-external-quality-menu';
       menu.style.cssText = `position:fixed;z-index:2147483647;top:${top}px;left:${left}px;width:${width}px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;padding:7px;background:#181818;border:1px solid #555;border-radius:7px;box-shadow:0 5px 18px #0009;`;
       const labelFor = (choice: 'hd' | 'sd' | 'image' | 'frame') => t(
-        choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame',
+        !HAS_PREMIUM || choice === 'sd' ? 'downloadSd' : choice === 'hd' ? 'downloadHd' : choice === 'image' ? 'downloadImage' : 'downloadFrame',
       );
       const dismiss = (event: Event) => {
         if (!menu.contains(event.target as Node)) {

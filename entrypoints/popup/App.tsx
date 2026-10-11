@@ -439,7 +439,7 @@ export default function App() {
             </label>
             <div style={{ color: '#ccc', padding: '4px 0' }}>
               <strong style={{ display: 'block', fontWeight: 500, marginBottom: 2 }}>{t('downloadOptions')}</strong>
-              {(['hd', 'sd', 'image', 'frame'] as const).filter(choice => !basicEdition || choice === 'sd').map(choice => (
+              {((HAS_PREMIUM ? ['hd', 'sd', 'image', 'frame'] : ['sd']) as Array<'hd' | 'sd' | 'image' | 'frame'>).filter(choice => !basicEdition || choice === 'sd').map(choice => (
                 <label key={choice} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', cursor: premium || choice === 'sd' ? 'pointer' : 'not-allowed', opacity: premium || choice === 'sd' ? 1 : 0.65 }}>
                   <input
                     type="checkbox"
@@ -447,7 +447,7 @@ export default function App() {
                     disabled={!premium}
                     onChange={e => void updateDownloadOption(choice, e.target.checked)}
                   />
-                  {t(choice === 'hd' ? 'downloadHd' : choice === 'sd' ? 'downloadSd' : choice === 'image' ? 'downloadImage' : 'downloadFrame')}
+                  {t(!HAS_PREMIUM || choice === 'sd' ? 'downloadSd' : choice === 'hd' ? 'downloadHd' : choice === 'image' ? 'downloadImage' : 'downloadFrame')}
                   {!premium && choice !== 'sd' && licensedEdition && <span onClick={lockedNotice} style={{ marginLeft: 'auto', color: '#e8c547' }}>{t('premiumLocked')}</span>}
                 </label>
               ))}
