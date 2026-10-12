@@ -15,7 +15,7 @@ sources:
 El repo **no contiene workflows** (`.github/` ausente). Lo único presente es la configuración de `release-please`:
 
 - `release-please-config.json`: paquete raíz, `release-type: node`, `tag-separator: "-"`.
-- `.release-please-manifest.json`: `{".":"0.1.54"}`.
+- `.release-please-manifest.json`: `{".":"0.1.55"}`.
 - `CHANGELOG.md`: enlaces a `github.com/softwarePhoenixbox/redgifs-extension` con tags `redgifs-extension-v<versión>`.
 
 Se deduce que release-please corre en GitHub, pero el workflow no está en este archivo comprimido ([pendiente 7](../README.md#pendiente-de-confirmar)). Compilación y empaquetado manual: [puesta en marcha](../01-getting-started/local-setup.md).

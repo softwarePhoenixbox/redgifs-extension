@@ -41,7 +41,7 @@ Fuente: `utils/download-options.ts`, `entrypoints/background.ts` (`handle`), `LE
 
 ## Estado
 
-Versión `0.1.54` (`package.json`, `wxt.config.ts`, `.release-please-manifest.json`). Último cambio registrado en `CHANGELOG.md`: 2026-09-25. Licencia del código: MIT (`LICENSE`).
+Versión `0.1.55` (`package.json`, `wxt.config.ts`, `.release-please-manifest.json`). Último cambio registrado en `CHANGELOG.md`: 2026-09-25. Licencia del código: MIT (`LICENSE`).
 
 ## Alcance y límites
 

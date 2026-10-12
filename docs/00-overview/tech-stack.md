@@ -22,6 +22,6 @@ Versiones resueltas desde el lockfile. Fuente de cada fila entre paréntesis.
 | Exportación XLSX (premium) | fflate | `0.8.3` | `pnpm-lock.yaml` |
 | Iconos | @wxt-dev/auto-icons / sharp | `1.1.2` / `0.35.4` | `pnpm-lock.yaml` |
 | Ejecución y lint en Firefox | web-ext | `10.6.0` | `pnpm-lock.yaml` |
-| Versión de la extensión | 0.1.54 | `0.1.54` | `package.json`, `wxt.config.ts` |
+| Versión de la extensión |  | `0.1.55` | `package.json`, `wxt.config.ts` |
 
 Runtime de Node para compilar: no declarado en el repo (sin `engines` ni `.nvmrc`). Ver [pendientes](../README.md#pendiente-de-confirmar).

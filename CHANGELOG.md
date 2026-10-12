@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.54](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.1.53...redgifs-extension-v0.1.54) (2026-09-25)
+## [0.1.55](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.1.53...redgifs-extension-v0.1.55) (2026-09-25)
 
 
 ### Bug Fixes
