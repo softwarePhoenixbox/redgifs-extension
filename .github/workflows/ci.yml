@@ -52,7 +52,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:all
-      - run: pnpm build:firefox -- --mode basic
+      - run: pnpm wxt build --mode basic -b firefox
       - run: node scripts/check-editions.mjs # basic no contiene código premium, permisos por edición, CSP
       - run: pnpm exec web-ext lint --source-dir .output/firefox-mv2-basic
 
