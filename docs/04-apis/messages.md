@@ -19,8 +19,8 @@ Contrato entre content scripts, popup, background y offscreen. Tipos en `utils/m
 | Tipo | Emisor | Campos clave | Respuesta (`ok:true`) | Plan |
 | --- | --- | --- | --- | --- |
 | `RG_RESOLVE_GIF` | content | `id` | `gif{videoUrl,hdVideoUrl,sdVideoUrl,imageUrl,metadata}` o `not_found`/`rate_limited` | libre |
-| `RG_DOWNLOAD` | content, Reddit | `id,url,quality?,title?,author?,tags?,pageUrl?,filename?,useOriginalFilename?` | `downloadId,metadata_embedded,metadata_warning` | `sd` libre; resto premium |
-| `RG_DOWNLOAD_FRAME` | content | `id,base64,filename?,useOriginalFilename?` | `downloadId` | premium |
+| `RG_DOWNLOAD` | content, Reddit | `id,url,quality?,title?,author?,tags?,pageUrl?,filename?,useOriginalFilename?` | `downloadId,metadata_embedded,metadata_warning,folder_warning` | `sd` libre; resto premium |
+| `RG_DOWNLOAD_FRAME` | content | `id,base64,filename?,useOriginalFilename?` | `downloadId,folder_warning` | premium |
 | `RG_SAVE_LINK` | content | `id,url,imageUrl?,pageUrl,title?,author?,tags?,views?,likes?` | `inserted,total` | libre |
 | `RG_SAVE_BULK` | content | `links: BulkLinkInput[]` | `inserted_count,updated_count,total` | premium |
 | `RG_STATS` | content, popup | — | `total` | libre |
@@ -49,7 +49,7 @@ Contrato entre content scripts, popup, background y offscreen. Tipos en `utils/m
 
 ## Hacia el offscreen
 
-`RG_OFFSCREEN_PREPARE_BLOB`, `RG_OFFSCREEN_PREPARE_IMAGE_BLOB`, `RG_OFFSCREEN_REVOKE_BLOB` — ver [offscreen](../03-services/offscreen.md).
+`RG_OFFSCREEN_PREPARE_BLOB`, `RG_OFFSCREEN_PREPARE_IMAGE_BLOB`, `RG_OFFSCREEN_REVOKE_BLOB`, `RG_OFFSCREEN_SAVE` (escribe en la carpeta elegida), `RG_FOLDER_CHECK` / `RG_OFFSCREEN_CHECK_FOLDER` (prueba real de escritura), `RG_DOWNLOAD_PROGRESS` (avance hacia el content script) — ver [offscreen](../03-services/offscreen.md).
 
 ## Cómo añadir un mensaje
 

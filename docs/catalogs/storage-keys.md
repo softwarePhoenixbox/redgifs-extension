@@ -21,6 +21,10 @@ sources:
 | `rgDownloadOptions` | `{hd,sd,image,frame}` | popup | Opciones de descarga elegidas (por defecto solo `hd`); en gratis se fuerza solo `sd` |
 | `rgDownloadQuality` | `'hd'\|'sd'\|'both'` | (legado) | Formato antiguo; `normalizeDownloadOptions` lo migra |
 | `rgOriginalFilename` | boolean | popup | `false` ⇒ nombre aleatorio (por defecto `true`) |
+| `rgOutputMode` | `'browser'\|'custom'` | popup, página `folder` | Destino: carpeta del navegador (por defecto) o carpeta elegida (solo Chromium) |
+| `rgOutputSubfolder` | string | popup | Subcarpeta opcional, se crea si falta. Sin valor ⇒ `redgifs`; `''` ⇒ directo en el destino |
+| `rgOutputCustomName` | string | página `folder` | Nombre visible de la carpeta elegida (el handle va en IndexedDB `rg-output`) |
+| `rgOutputAuthorizedAt` | number | página `folder` | Marca de tiempo; solo sirve para que el popup se refresque tras autorizar |
 | `rgAutoSave` | boolean | content | Auto-guardado |
 | `rgAutoSaveMinViews` | number | content | Umbral de vistas (0 = siempre) |
 | `rgPanelPosition` | number 0–3 | content | Esquina del panel |

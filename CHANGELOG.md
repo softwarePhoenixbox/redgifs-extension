@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.3.3](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.2...redgifs-extension-v0.3.3) (2026-10-14)
+
+### Fixed
+
+* Firefox: el manifest ahora declara el ID del complemento en AMO (`browser_specific_settings.gecko.id`). Sin él, Mozilla rechazaba la subida con «The add-on ID in your manifest.json does not match the ID of your add-on on AMO».
+
+## [0.3.2](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.1...redgifs-extension-v0.3.2) (2026-10-14)
+
+### Fixed
+
+* descargas con barra de progreso muy lentas: el archivo se bajaba por una sola conexión, que el CDN limita. Ahora se baja en hasta 8 tramos en paralelo (Range) y se arma en memoria; si el servidor no soporta Range, se usa la descarga de una conexión como antes.
+
+## [0.3.1](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.0...redgifs-extension-v0.3.1) (2026-10-14)
+
+### Fixed
+
+* carpeta elegida: el popup mostraba «Ready» aunque el documento que guarda las descargas no tenía permiso de escritura, y la descarga caía a la carpeta del navegador. «Ready» ahora solo aparece tras una escritura de prueba real hecha por ese documento.
+* «Authorize» ahora abre la pestaña de la extensión (Chrome solo ofrece «Permitir en cada visita» sobre una pestaña, no sobre el popup), y esa página también verifica la escritura al terminar.
+* mensaje de permiso más claro cuando Chrome pide autorizar de nuevo la carpeta.
+
+## [0.3.0](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.2.0...redgifs-extension-v0.3.0) (2026-10-14)
+
+
+### Added
+
+* ajuste «Destino de descargas» en el popup: carpeta predeterminada del navegador o una carpeta elegida (cualquier disco, solo Chromium) con subcarpeta opcional que se crea sola si no existe o se borró.
+* página `folder` para elegir la carpeta y pedir el permiso de escritura (el selector nativo cierra el popup).
+* ajustes `rgOutputMode`, `rgOutputSubfolder`, `rgOutputCustomName`; mensaje interno `RG_OFFSCREEN_SAVE` y campo opcional `folder_warning` en las respuestas de descarga (aditivos).
+
+### Changed
+
+* el texto de confirmación de la descarga ya no dice «Descargas/redgifs» fijo. Sin tocar los ajustes se sigue guardando en `Descargas/redgifs`, igual que antes.
+
 ## [0.2.0](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.1.55...redgifs-extension-v0.2.0) (2026-10-14)
 
 

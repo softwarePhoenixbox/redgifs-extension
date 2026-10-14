@@ -5,6 +5,7 @@ import { DEFAULT_DOWNLOAD_OPTIONS, normalizeDownloadOptions, type DownloadChoice
 import { popupMessage, type PopupLanguage } from '../../utils/popup-i18n';
 import type { LicenseState } from '../../utils/license';
 import { EDITION, HAS_PREMIUM } from '../../utils/edition';
+import { OutputFolderSettings } from './OutputFolderSettings';
 
 async function send(request: RgRequest, language: PopupLanguage): Promise<RgResponse> {
   try {
@@ -457,6 +458,7 @@ export default function App() {
               </label>
               <small style={{ display: 'block', color: '#999', lineHeight: 1.3, marginTop: 2 }}>{t('downloadOptionsHint')}</small>
             </div>
+            <OutputFolderSettings t={t} />
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', padding: '4px 0', cursor: 'pointer' }}>
               <input type="checkbox" checked={panelEnabled} onChange={e => void updateSetting('rgPanelEnabled', e.target.checked)} />
               {t('showPanel')}

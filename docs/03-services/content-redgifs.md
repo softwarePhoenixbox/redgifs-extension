@@ -39,7 +39,7 @@ Si deja de funcionar, revisar con el inspector: `[data-feed-item-id]`, `.GifPrev
 
 ## Ajustes que lee (`storage.local`)
 
-Ver [catálogo](../catalogs/storage-keys.md): `rgAutoSave`, `rgAutoSaveMinViews`, `rgPanelPosition`, `rgPanelCollapsed`, `rgPanelEnabled`, `rgDownloadActionEnabled`, `rgDownloadQuality` (legado), `rgDownloadOptions`, `rgOriginalFilename`, `rgLanguage`, `rgPremium`. Reacciona a `storage.onChanged`.
+Ver [catálogo](../catalogs/storage-keys.md): `rgAutoSave`, `rgAutoSaveMinViews`, `rgPanelPosition`, `rgPanelCollapsed`, `rgPanelEnabled`, `rgDownloadActionEnabled`, `rgDownloadQuality` (legado), `rgDownloadOptions`, `rgOriginalFilename`, `rgOutputMode`, `rgOutputSubfolder`, `rgOutputCustomName`, `rgLanguage`, `rgPremium`. Reacciona a `storage.onChanged`.
 
 ## Limpieza
 

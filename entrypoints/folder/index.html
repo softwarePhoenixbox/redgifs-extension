@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Download folder</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #151515; color: #e6e6e6; font: 14px/1.5 system-ui, sans-serif; }
+      main { width: min(440px, 90vw); background: #1f1f1f; border: 1px solid #3a3a3a; border-radius: 12px; padding: 24px; }
+      h1 { margin: 0 0 8px; font-size: 18px; }
+      p { margin: 0 0 18px; color: #b5b5b5; }
+      button { background: #2f6bff; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      #current { margin-bottom: 12px; color: #ddd; word-break: break-all; }
+      #actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      button.secondary { background: #3a3a3a; border: 1px solid #555; color: #eee; }
+      [hidden] { display: none !important; }
+      #hint { display: block; margin-top: 10px; color: #999; }
+      #status { margin-top: 14px; min-height: 20px; }
+      #status.ok { color: #6ee7a0; }
+      #status.error { color: #ff8b8b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title"></h1>
+      <p id="text"></p>
+      <div id="current"></div>
+      <div id="actions">
+        <button id="pick" type="button"></button>
+        <button id="authorize" type="button" class="secondary" hidden></button>
+      </div>
+      <div id="status" role="status"></div>
+      <small id="hint"></small>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

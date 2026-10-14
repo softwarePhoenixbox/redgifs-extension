@@ -583,7 +583,8 @@ export default defineContentScript({
         useOriginalFilename: originalFilenameEnabled,
       });
       if (!response.ok) throw new Error(response.error);
-      showToast(t('captureFrameStarted'));
+      if (response.folder_warning) showToast(`⚠ ${response.folder_warning}`, 'error');
+      else showToast(t('captureFrameStarted'));
     }
 
     async function downloadGifChoice(id: string, choice: DownloadChoice, root: HTMLElement | null, progressId?: string): Promise<void> {
@@ -612,7 +613,8 @@ export default defineContentScript({
         }),
       });
       if (!download.ok) throw new Error(download.error);
-      if (HAS_PREMIUM && choice === 'image') showToast(t('imageDownloadStarted'));
+      if (download.folder_warning) showToast(`⚠ ${download.folder_warning}`, 'error');
+      else if (HAS_PREMIUM && choice === 'image') showToast(t('imageDownloadStarted'));
       else showToast(download.metadata_embedded ? t('downloadStartedMetadata') : (download.metadata_warning ?? t('downloadedWithoutMetadata')), download.metadata_embedded ? 'ok' : 'error');
     }
 
@@ -866,6 +868,10 @@ export default defineContentScript({
               }),
             });
             if (!res.ok) throw new Error(res.error);
+            if (res.folder_warning) {
+              setStatus(dlStatus, `⚠ ${res.folder_warning}`, 'error');
+              return;
+            }
             if (HAS_PREMIUM && quality === 'image') {
               setStatus(dlStatus, t('imageDownloadStarted'), 'ok');
               return;

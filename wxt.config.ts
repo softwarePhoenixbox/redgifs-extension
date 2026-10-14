@@ -21,13 +21,13 @@ const isBasicBuild = cliMode() === 'basic';
 
 export default defineConfig({
   // basic: sin el content script de Reddit (solo existe en premium y activated).
-  filterEntrypoints: isBasicBuild ? ['background', 'content', 'popup', 'offscreen'] : undefined,
+  filterEntrypoints: isBasicBuild ? ['background', 'content', 'popup', 'offscreen', 'folder'] : undefined,
   // basic → stubs públicos (sin lógica premium); cualquier otro modo → carpeta premium/.
   alias: { '@premium': cliMode() === 'basic' ? 'stubs/premium' : 'premium' },
   modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
   manifest: ({ mode }) => ({
     name: mode === 'activated' ? 'RedGifs Extension (activated, personal)' : 'RedGifs Extension',
-    version: '0.2.0',
+    version: '0.3.3',
     permissions: ['activeTab', 'storage', 'downloads'],
     host_permissions: [
       'https://api.redgifs.com/*',
@@ -38,6 +38,8 @@ export default defineConfig({
     ],
     browser_specific_settings: {
       gecko: {
+        // ID del complemento en AMO (Mozilla lo compara con el del manifest al subir una versión; si no coincide, rechaza el paquete).
+        id: '{41549e95-b4fd-4705-a49c-fb62964d8e7c}',
         // Los GIF guardados quedan en local. La edición con licencia envía al servidor solo el ID aleatorio de la instalación
         // (el email se escribe en la web de canje, no en la extensión).
         data_collection_permissions: { required: isLicensed(mode) ? ['technicalAndInteraction'] : ['none'] },

@@ -34,6 +34,19 @@ export type RgRequest =
   // total = 0 significa tamaño desconocido (barra indeterminada).
   | { type: 'RG_DOWNLOAD_PROGRESS'; progressId: string; loaded: number; total: number }
   | { type: 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB'; base64: string }
+  // Guarda el archivo directo en la carpeta personalizada elegida (modo custom, solo Chromium).
+  | {
+      type: 'RG_OFFSCREEN_SAVE';
+      source: { url: string } | { base64: string };
+      name: string; // nombre de archivo, sin carpetas
+      subfolder: string;
+      metadata?: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null };
+      progressId?: string;
+    }
+  // Prueba de escritura real en la carpeta elegida, hecha por el offscreen (quien escribe las descargas).
+  | { type: 'RG_OFFSCREEN_CHECK_FOLDER' }
+  // Popup / página de carpeta -> background -> offscreen: ¿se puede escribir en la carpeta elegida?
+  | { type: 'RG_FOLDER_CHECK' }
   | { type: 'RG_OFFSCREEN_REVOKE_BLOB'; blob_url: string }
   | { type: 'RG_DOWNLOAD_FRAME'; id: string; base64: string; filename?: string; useOriginalFilename?: boolean }
   | { type: 'RG_REDDIT_MENU_OPEN'; requestId: string; gifId: string; choices: Array<'hd' | 'sd' | 'image' | 'frame'> }
@@ -111,6 +124,8 @@ export type RgResponse =
       downloadId?: number; // RG_DOWNLOAD
       metadata_embedded?: boolean; // RG_DOWNLOAD
       metadata_warning?: string; // RG_DOWNLOAD
+      folder_warning?: string; // RG_DOWNLOAD / RG_DOWNLOAD_FRAME: no se pudo usar la carpeta elegida; se guardó en la del navegador
+      saved_name?: string; // RG_OFFSCREEN_SAVE
       inserted?: boolean; // RG_SAVE_LINK (false = el link ya estaba guardado)
       total?: number; // RG_SAVE_LINK, RG_STATS, RG_IMPORT_DB y RG_DELETE_LINK
       exists?: boolean; // RG_CHECK_LINK

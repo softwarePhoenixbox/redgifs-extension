@@ -2,6 +2,7 @@ import { premium } from '@premium';
 import { HAS_PREMIUM } from '../utils/edition';
 import { embedMp4Metadata } from '../utils/mp4-metadata';
 import { fetchBytesWithProgress } from '../utils/fetch-progress';
+import { applySubfolder, checkChosenFolderWritable, readOutputSettings } from '../utils/output-folder';
 import {
   deleteLink,
   getTotal,
@@ -328,11 +329,35 @@ function frameDownloadFilename(id: string, requestedName?: string, useOriginalFi
   return `redgifs/${id}-frame.jpg`;
 }
 
-async function startFrameDownload(request: Extract<RgRequest, { type: 'RG_DOWNLOAD_FRAME' }>): Promise<number> {
+async function startFrameDownload(request: Extract<RgRequest, { type: 'RG_DOWNLOAD_FRAME' }>): Promise<{ downloadId?: number; folderWarning?: string }> {
   if (!ID_RE.test(request.id) || !/^[A-Za-z0-9+/]+={0,2}$/.test(request.base64)) {
     throw new Error('Datos del fotograma inválidos');
   }
-  const filename = frameDownloadFilename(request.id, request.filename, request.useOriginalFilename);
+  const output = await readOutputSettings();
+  const filename = applySubfolder(frameDownloadFilename(request.id, request.filename, request.useOriginalFilename), output.subfolder);
+  let folderWarning: string | undefined;
+  const offscreenApi = chromeOffscreenApi();
+  if (output.mode === 'custom' && offscreenApi) {
+    try {
+      await ensureChromeOffscreenDocument(offscreenApi);
+      const saved = await browser.runtime.sendMessage({
+        type: 'RG_OFFSCREEN_SAVE',
+        source: { base64: request.base64 },
+        name: filename.split('/').pop() ?? filename,
+        subfolder: output.subfolder,
+      } satisfies RgRequest) as RgResponse | undefined;
+      if (saved?.ok) return {};
+      folderWarning = saved && !saved.ok ? saved.error : 'No hubo respuesta del guardado en carpeta';
+    } catch (error) {
+      folderWarning = error instanceof Error ? error.message : String(error);
+    }
+    folderWarning = `No se pudo guardar en la carpeta elegida (${folderWarning}). Se guardó en la carpeta de descargas del navegador.`;
+  }
+  const downloadId = await startBrowserFrameDownload(request, filename);
+  return folderWarning ? { downloadId, folderWarning } : { downloadId };
+}
+
+async function startBrowserFrameDownload(request: Extract<RgRequest, { type: 'RG_DOWNLOAD_FRAME' }>, filename: string): Promise<number> {
   let blobUrl: string | undefined;
   let offscreen = false;
   try {
@@ -372,18 +397,58 @@ async function startFrameDownload(request: Extract<RgRequest, { type: 'RG_DOWNLO
   }
 }
 
+type VideoDownloadResult = { downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string; folderWarning?: string };
+type VideoMetadata = { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null };
+
+// Aplica el destino elegido por el usuario (ajustes de carpeta):
+//  - carpeta personalizada (Chromium): el offscreen document escribe el archivo directo en ella;
+//  - si no se puede (sin permiso, carpeta borrada…), cae a la carpeta del navegador y avisa en `folderWarning`;
+//  - carpeta del navegador: downloads.download con la subcarpeta configurada (el navegador la crea si no existe).
 async function startVideoDownload(
   id: string,
   url: string,
-  metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null },
+  metadata: VideoMetadata,
   quality?: 'hd' | 'sd' | 'image',
   requestedName?: string,
   useOriginalFilename?: boolean,
   progressId?: string,
-): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
-  // Media URLs carry RedGifs' canonical case-sensitive ID (e.g.
-  // ZanyJudiciousRook-mobile.mp4); prefer it over lowercase /ifr/ IDs.
-  const filename = downloadFilename(id, url, quality, requestedName, useOriginalFilename);
+): Promise<VideoDownloadResult> {
+  const output = await readOutputSettings();
+  const filename = applySubfolder(downloadFilename(id, url, quality, requestedName, useOriginalFilename), output.subfolder);
+  let folderWarning: string | undefined;
+  const offscreenApi = chromeOffscreenApi();
+  if (output.mode === 'custom' && offscreenApi) {
+    try {
+      await ensureChromeOffscreenDocument(offscreenApi);
+      const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
+      const saved = await browser.runtime.sendMessage({
+        type: 'RG_OFFSCREEN_SAVE',
+        source: { url },
+        name: filename.split('/').pop() ?? filename,
+        subfolder: output.subfolder,
+        metadata: hasMetadata ? metadata : undefined,
+        progressId,
+      } satisfies RgRequest) as RgResponse | undefined;
+      if (saved?.ok) {
+        return { metadataEmbedded: saved.metadata_embedded === true, metadataWarning: saved.metadata_warning };
+      }
+      folderWarning = saved && !saved.ok ? saved.error : 'No hubo respuesta del guardado en carpeta';
+    } catch (error) {
+      folderWarning = error instanceof Error ? error.message : String(error);
+    }
+    folderWarning = `No se pudo guardar en la carpeta elegida (${folderWarning}). Se guardó en la carpeta de descargas del navegador.`;
+  }
+  const result = await startBrowserVideoDownload(url, filename, metadata, progressId, id);
+  return folderWarning ? { ...result, folderWarning } : result;
+}
+
+async function startBrowserVideoDownload(
+  url: string,
+  filename: string,
+  metadata: VideoMetadata,
+  progressId: string | undefined,
+  id: string,
+): Promise<VideoDownloadResult> {
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
     const downloadId = await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false });
@@ -519,12 +584,25 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
         downloadId: result.downloadId,
         metadata_embedded: result.metadataEmbedded,
         metadata_warning: result.metadataWarning,
+        folder_warning: result.folderWarning,
       };
+    }
+    case 'RG_FOLDER_CHECK': {
+      // Debe probarlo el mismo documento que escribe las descargas (offscreen); si no hay, se prueba aquí.
+      const offscreenApi = chromeOffscreenApi();
+      if (!offscreenApi) {
+        await checkChosenFolderWritable();
+        return { ok: true };
+      }
+      await ensureChromeOffscreenDocument(offscreenApi);
+      const res = await browser.runtime.sendMessage({ type: 'RG_OFFSCREEN_CHECK_FOLDER' } satisfies RgRequest) as RgResponse | undefined;
+      return res ?? { ok: false, error: 'No hubo respuesta del documento de guardado' };
     }
     case 'RG_DOWNLOAD_FRAME': {
       if (!HAS_PREMIUM) throw new Error('Not available in the basic edition');
       await requirePremium();
-      return { ok: true, downloadId: await startFrameDownload(msg) };
+      const frame = await startFrameDownload(msg);
+      return { ok: true, downloadId: frame.downloadId, folder_warning: frame.folderWarning };
     }
     case 'RG_SAVE_LINK': {
       if (!ID_RE.test(msg.id) || !isRedgifsUrl(msg.url)) throw new Error('Datos inválidos');
