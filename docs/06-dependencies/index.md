@@ -16,10 +16,10 @@ Rango declarado (package.json) frente a versión resuelta (pnpm-lock.yaml). La c
 | `@ffmpeg/core` | prod | `0.12.10` | `0.12.10` | GPL-2.0-or-later | — (sin import directo) |
 | `@ffmpeg/ffmpeg` | prod | `^0.12.15` | `0.12.15` | MIT | — (sin import directo) |
 | `@ffmpeg/util` | prod | `^0.12.2` | `0.12.2` | MIT | — (sin import directo) |
-| `fflate` | prod | `^0.8.3` | `0.8.3` | MIT | `premium\exporters.ts` |
-| `react` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints\popup\App.tsx`, `entrypoints\popup\main.tsx`, `entrypoints\popup\OutputFolderSettings.tsx` |
-| `react-dom` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints\popup\main.tsx` |
-| `sql.js` | prod | `^1.14.2` | `1.14.2` | MIT | `utils\links-db.ts` |
+| `fflate` | prod | `^0.8.3` | `0.8.3` | MIT | `premium/exporters.ts` |
+| `react` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints/popup/App.tsx`, `entrypoints/popup/main.tsx`, `entrypoints/popup/OutputFolderSettings.tsx` |
+| `react-dom` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints/popup/main.tsx` |
+| `sql.js` | prod | `^1.14.2` | `1.14.2` | MIT | `utils/links-db.ts` |
 | `@types/react` | dev | `^19.3.0` | `19.3.0` | MIT | herramienta de build/tipos |
 | `@types/react-dom` | dev | `^19.3.0` | `19.3.0` | MIT | herramienta de build/tipos |
 | `@types/sql.js` | dev | `^1.4.11` | `1.4.11` | MIT | herramienta de build/tipos |
