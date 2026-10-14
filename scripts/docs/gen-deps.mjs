@@ -56,7 +56,8 @@ const sources = [...usage().flatMap(d => (d.endsWith('.ts') ? (existsSync(join(r
 const sourceText = sources.map(f => ({ f: f.slice(root.length + 1).replaceAll('\\', '/'), t: readFileSync(f, 'utf8') }));
 function usedIn(name) {
   const re = new RegExp(`from\\s+['"]${name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?:/[^'"]*)?['"]`);
-  const hits = sourceText.filter(s => re.test(s.t)).map(s => s.f);
+  // Orden fijo (por código de carácter): el del sistema de archivos difiere entre Windows y Linux y haría fallar el CI.
+  const hits = sourceText.filter(s => re.test(s.t)).map(s => s.f).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return hits;
 }
 const used = name => {
