@@ -2,6 +2,7 @@
 title: Estrategia de pruebas
 owner: pendiente-de-confirmar
 status: draft
+last_reviewed: 2026-10-14
 review_every_days: 90
 ---
 
