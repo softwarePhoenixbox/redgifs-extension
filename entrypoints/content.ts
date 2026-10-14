@@ -1,6 +1,7 @@
 import type { ExportFormat, RgRequest, RgResponse } from '../utils/messages';
 import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
 import { HAS_PREMIUM } from '../utils/edition';
+import { setHtml } from '../utils/safe-html';
 import { DEFAULT_DOWNLOAD_OPTIONS, effectiveDownloadOptions, enabledDownloadChoices, normalizeDownloadOptions, type DownloadChoice, type DownloadOptions } from '../utils/download-options';
 
 export default defineContentScript({
@@ -194,7 +195,7 @@ export default defineContentScript({
     panel.id = PANEL_ID;
     panel.style.cssText =
   'position:fixed; top:20px; left:20px; z-index:10000; background:rgba(18,18,18,0.98); color:white; padding:15px; border-radius:12px; font-family:sans-serif; width:300px; border:1px solid #00ff00; box-shadow:0 10px 30px rgba(0,0,0,0.8); display:flex; flex-direction:column;';
-    panel.innerHTML = `
+    setHtml(panel, `
       <div id="rg-header" style="font-weight:bold; border-bottom:1px solid #444; padding-bottom:10px; margin-bottom:10px; color:#00ff00; display:flex; align-items:center; gap:8px;">
         <span id="rg-panel-title">${t('panelTitle')}</span>
         <div style="margin-left:auto; display:flex; gap:6px;">
@@ -205,7 +206,7 @@ export default defineContentScript({
       <div id="rg-content" style="font-size:12px; min-height:80px; display:flex; align-items:center; justify-content:center;">
         <p style="color:#888; text-align:center;">${t('detectPrompt')}</p>
       </div>
-    `;
+    `);
     document.body.appendChild(panel);
 
     const content = panel.querySelector<HTMLDivElement>('#rg-content')!;
@@ -652,7 +653,7 @@ export default defineContentScript({
           button.title = t('downloadWithMetadata');
           button.setAttribute('aria-label', t('downloadVideo'));
           button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-shadow:0 1px 3px #000;';
-          button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
+          setHtml(button, '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>');
           const label = document.createElement('span');
           label.className = 'label';
           label.textContent = t('download');
@@ -711,7 +712,7 @@ export default defineContentScript({
         button.title = t('downloadWithMetadata');
         button.setAttribute('aria-label', t('downloadVideo'));
         button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;';
-        button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
+        setHtml(button, '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>');
         const label = document.createElement('span');
         label.className = 'label';
         label.textContent = t('download');

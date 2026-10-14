@@ -42,7 +42,7 @@ function reportProgress(progressId: string | undefined, loaded: number, total: n
 async function trackBrowserDownload(downloadId: number, progressId: string | undefined): Promise<void> {
   if (!progressId) return;
   for (let i = 0; i < 2400; i++) { // ~10 min como máximo
-    let item: Awaited<ReturnType<typeof browser.downloads.search>>[number] | undefined;
+    let item: { state?: string; totalBytes: number; bytesReceived: number } | undefined;
     try {
       [item] = await browser.downloads.search({ id: downloadId });
     } catch {

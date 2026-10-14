@@ -372,17 +372,16 @@ export default function App() {
             <button
               type="button"
               onClick={() => setLicenseOpen(value => !value)}
-              title={t('licenseTitle')}
+              title={`${t('licenseTitle')}: ${premium ? t('planPremium') : t('planFree')}${license?.metered && license.remaining !== null ? ` (${license.remaining})` : ''}`}
               aria-label={t('licenseTitle')}
               aria-expanded={licenseOpen}
               style={{ background: premium ? '#2b4d1f' : licenseOpen ? '#454545' : 'transparent', border: '1px solid ' + (premium ? '#00ff00' : '#555'), borderRadius: 5, color: premium ? '#00ff00' : '#ddd', cursor: 'pointer', fontSize: 11, fontWeight: 'bold', lineHeight: 1, padding: '5px 7px' }}
             >
-              ⭐ {premium ? t('planPremium') : t('planFree')}
-              {license?.metered && license.remaining !== null ? ` (${license.remaining})` : ''}
+              ⭐
             </button>
           )}
           {EDITION === 'activated' && (
-            <span style={{ border: '1px solid #00ff00', borderRadius: 5, color: '#00ff00', fontSize: 11, fontWeight: 'bold', padding: '5px 7px' }}>⭐ {t('activatedBuild')}</span>
+            <span style={{ border: '1px solid #00ff00', borderRadius: 5, color: '#00ff00', fontSize: 11, fontWeight: 'bold', padding: '5px 7px' }} title={t('activatedBuild')} aria-label={t('activatedBuild')}>⭐</span>
           )}
           <button
             type="button"

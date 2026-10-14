@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.5](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.4...redgifs-extension-v0.3.5) (2026-10-14)
+
+### Changed
+
+* popup: el distintivo del plan (Free / Premium / «Premium (activated build)») ahora muestra solo una estrella, en cualquier edición. El texto y los usos restantes pasan al tooltip.
+
+## [0.3.4](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.3...redgifs-extension-v0.3.4) (2026-10-14)
+
+### Fixed
+
+* Firefox: el ajuste «Destino de descargas» mostraba «Choose a folder (any drive)» deshabilitado, porque Firefox no puede elegir carpetas (no tiene `showDirectoryPicker`). Ahora, sin selector de carpetas, el popup solo muestra la subcarpeta opcional dentro de la carpeta de descargas del navegador. En Chrome no cambia nada.
+
+## 0.3.3.1 (2026-10-14)
+
+### Fixed
+
+* Firefox (AMO): se eliminan las asignaciones a `innerHTML` del código propio (panel flotante y botones de descarga, también en Reddit) para quitar el aviso «Unsafe assignment to innerHTML» del validador. El HTML se interpreta ahora con `DOMParser` (`utils/safe-html.ts`); el resultado en pantalla es idéntico. Los avisos que quedan pertenecen a React (`react-dom`) y no son de este código.
+
 ## [0.3.3](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.2...redgifs-extension-v0.3.3) (2026-10-14)
 
 ### Fixed

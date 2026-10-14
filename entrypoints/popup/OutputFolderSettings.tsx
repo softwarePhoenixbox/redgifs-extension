@@ -84,10 +84,14 @@ export function OutputFolderSettings({ t }: { t: T }) {
 
   return (
     <div style={{ color: '#ccc', padding: '4px 0' }}>
-      <strong style={{ display: 'block', fontWeight: 500, marginBottom: 2 }}>{t('outputFolder')}</strong>
-      {radio('browser', t('outputBrowserDefault'))}
-      {radio('custom', t('outputCustom'), !canPick)}
-      {!canPick && <small style={{ display: 'block', color: '#999', lineHeight: 1.3 }}>{t('outputUnsupported')}</small>}
+      {/* Sin selector de carpetas (Firefox) solo existe la carpeta del navegador: no se muestran las opciones de destino, solo la subcarpeta. */}
+      {canPick && (
+        <>
+          <strong style={{ display: 'block', fontWeight: 500, marginBottom: 2 }}>{t('outputFolder')}</strong>
+          {radio('browser', t('outputBrowserDefault'))}
+          {radio('custom', t('outputCustom'))}
+        </>
+      )}
       {mode === 'custom' && canPick && (
         <div style={{ margin: '4px 0 2px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>

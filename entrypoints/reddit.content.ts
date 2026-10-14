@@ -1,4 +1,5 @@
 import { HAS_PREMIUM } from '../utils/edition';
+import { setHtml } from '../utils/safe-html';
 import { popupMessage, type PopupLanguage } from '../utils/popup-i18n';
 import type { RgRequest, RgResponse } from '../utils/messages';
 
@@ -176,7 +177,7 @@ export default defineContentScript({
       button.title = t('downloadWithMetadata');
       button.setAttribute('aria-label', t('downloadVideo'));
       button.style.cssText = 'background:transparent;border:0;color:#fff;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font:12px Arial,sans-serif;text-shadow:0 1px 3px #000;';
-      button.innerHTML = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>';
+      setHtml(button, '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 17v3h14v-3"/></svg>');
       const label = document.createElement('span');
       label.textContent = t('download');
       button.appendChild(label);
