@@ -53,7 +53,7 @@ function walk(dir, acc = []) {
   return acc;
 }
 const sources = [...usage().flatMap(d => (d.endsWith('.ts') ? (existsSync(join(root, d)) ? [join(root, d)] : []) : walk(join(root, d))))];
-const sourceText = sources.map(f => ({ f: f.slice(root.length + 1), t: readFileSync(f, 'utf8') }));
+const sourceText = sources.map(f => ({ f: f.slice(root.length + 1).replaceAll('\\', '/'), t: readFileSync(f, 'utf8') }));
 function usedIn(name) {
   const re = new RegExp(`from\\s+['"]${name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?:/[^'"]*)?['"]`);
   const hits = sourceText.filter(s => re.test(s.t)).map(s => s.f);
