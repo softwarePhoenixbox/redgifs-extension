@@ -21,3 +21,4 @@ jobs:
           git diff --exit-code -- docs/06-dependencies/index.md docs/00-overview/tech-stack.md || (echo "Ejecuta node scripts/docs/gen-deps.mjs y confirma el resultado"; exit 1)
       - name: Enlaces y frescura
         run: node scripts/docs/check-docs.mjs --strict
+        
