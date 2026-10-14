@@ -16,18 +16,22 @@ Rango declarado (package.json) frente a versión resuelta (pnpm-lock.yaml). La c
 | `@ffmpeg/core` | prod | `0.12.10` | `0.12.10` | GPL-2.0-or-later | — (sin import directo) |
 | `@ffmpeg/ffmpeg` | prod | `^0.12.15` | `0.12.15` | MIT | — (sin import directo) |
 | `@ffmpeg/util` | prod | `^0.12.2` | `0.12.2` | MIT | — (sin import directo) |
-| `fflate` | prod | `^0.8.3` | `0.8.3` | MIT | `premium/exporters.ts` |
-| `react` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints/popup/App.tsx`, `entrypoints/popup/main.tsx` |
-| `react-dom` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints/popup/main.tsx` |
-| `sql.js` | prod | `^1.14.2` | `1.14.2` | MIT | `utils/links-db.ts` |
+| `fflate` | prod | `^0.8.3` | `0.8.3` | MIT | `premium\exporters.ts` |
+| `react` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints\popup\App.tsx`, `entrypoints\popup\main.tsx`, `entrypoints\popup\OutputFolderSettings.tsx` |
+| `react-dom` | prod | `^19.3.0` | `19.3.0` | MIT | `entrypoints\popup\main.tsx` |
+| `sql.js` | prod | `^1.14.2` | `1.14.2` | MIT | `utils\links-db.ts` |
 | `@types/react` | dev | `^19.3.0` | `19.3.0` | MIT | herramienta de build/tipos |
 | `@types/react-dom` | dev | `^19.3.0` | `19.3.0` | MIT | herramienta de build/tipos |
 | `@types/sql.js` | dev | `^1.4.11` | `1.4.11` | MIT | herramienta de build/tipos |
+| `@vitest/coverage-v8` | dev | `^3.2.7` | `3.2.7` | MIT | herramienta de build/tipos |
 | `@wxt-dev/auto-icons` | dev | `^1.1.2` | `1.1.2` | MIT | herramienta de build/tipos |
 | `@wxt-dev/module-react` | dev | `^1.2.2` | `1.2.2` | MIT | herramienta de build/tipos |
-| `sharp` | dev | `^0.35.4` | `0.35.4` | Apache-2.0 | herramienta de build/tipos |
+| `fake-indexeddb` | dev | `^6.2.5` | `6.2.5` | Apache-2.0 | herramienta de build/tipos |
+| `fast-xml-parser` | dev | `^5.11.2` | `5.11.2` | MIT | herramienta de build/tipos |
+| `sharp` | dev | `^0.35.5` | `0.35.5` | Apache-2.0 | herramienta de build/tipos |
 | `typescript` | dev | `^7.0.2` | `7.0.2` | Apache-2.0 | herramienta de build/tipos |
+| `vitest` | dev | `^3.2.7` | `3.2.7` | MIT | herramienta de build/tipos |
 | `web-ext` | dev | `^10.6.0` | `10.6.0` | MPL-2.0 | herramienta de build/tipos |
 | `wxt` | dev | `^0.21.4` | `0.21.4` | MIT | herramienta de build/tipos |
 
-Total: 16 dependencias directas (7 de producción).
+Total: 20 dependencias directas (7 de producción).
