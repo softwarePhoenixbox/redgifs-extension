@@ -27,7 +27,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react', '@wxt-dev/auto-icons'],
   manifest: ({ mode }) => ({
     name: mode === 'activated' ? 'RedGifs Extension (activated, personal)' : 'RedGifs Extension',
-    version: '0.1.55',
+    version: '0.2.0',
     permissions: ['activeTab', 'storage', 'downloads'],
     host_permissions: [
       'https://api.redgifs.com/*',

@@ -224,7 +224,8 @@ export default defineContentScript({
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent =
-      '@keyframes zoomIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }';
+      '@keyframes zoomIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }' +
+      '@keyframes rgDownloadSlide { from { transform:translateX(-100%); } to { transform:translateX(300%); } }';
     document.head.appendChild(style);
 
     // ---------- Estado ----------
@@ -267,6 +268,80 @@ export default defineContentScript({
         console.error(`[RG Scroller] Falló el envío del mensaje ${request.type}`);
         return { ok: false, error: 'No se pudo contactar con la extensión. Recarga la página.' };
       }
+    }
+
+    // ---------- Progreso del botón de descarga ----------
+    const DOWNLOAD_BLUE = '#3b8bff';
+    const downloadProgressListeners = new Map<string, (loaded: number, total: number) => void>();
+
+    interface DownloadProgress {
+      id: string;
+      done(ok: boolean): void;
+    }
+
+    // Mientras descarga: icono y texto pasan a azul, "Preparing…" desaparece y
+    // aparece una línea de progreso debajo. Sin tamaño conocido la línea se
+    // mueve en bucle (indeterminada); con tamaño se llena de 0 a 100 %.
+    function beginDownloadProgress(button: HTMLButtonElement, label: HTMLElement): DownloadProgress {
+      const id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const idleColor = '#fff';
+      const track = document.createElement('span');
+      track.className = 'rg-progress-track';
+      track.setAttribute('role', 'progressbar');
+      track.setAttribute('aria-valuemin', '0');
+      track.setAttribute('aria-valuemax', '100');
+      track.style.cssText = 'display:block;align-self:stretch;min-width:44px;height:4px;margin-top:5px;border-radius:999px;background:rgba(255,255,255,0.3);overflow:hidden;';
+      const fill = document.createElement('span');
+      fill.style.cssText = `display:block;height:100%;width:35%;border-radius:999px;background:${DOWNLOAD_BLUE};box-shadow:0 0 6px ${DOWNLOAD_BLUE};animation:rgDownloadSlide 1s ease-in-out infinite;`;
+      track.appendChild(fill);
+      button.appendChild(track);
+
+      button.style.color = DOWNLOAD_BLUE;
+      button.style.cursor = 'progress';
+      button.style.opacity = '1';
+      label.style.color = DOWNLOAD_BLUE;
+      label.style.fontWeight = '600';
+      label.textContent = t('download');
+
+      let determinate = false;
+      const update = (loaded: number, total: number): void => {
+        if (total <= 0) return;
+        const percent = Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
+        if (!determinate) {
+          determinate = true;
+          fill.style.animation = 'none';
+          fill.style.transition = 'width 0.2s ease-out';
+        }
+        fill.style.width = `${percent}%`;
+        track.setAttribute('aria-valuenow', String(percent));
+        if (label.isConnected) label.textContent = `${percent}%`;
+      };
+      downloadProgressListeners.set(id, update);
+
+      const restore = (): void => {
+        track.remove();
+        if (button.querySelector('.rg-progress-track')) return; // ya empezó otra descarga en este botón
+        button.style.color = idleColor;
+        button.style.cursor = 'pointer';
+        label.style.color = idleColor;
+        label.style.fontWeight = '';
+        if (label.isConnected) label.textContent = t('download');
+      };
+      return {
+        id,
+        done(ok: boolean): void {
+          downloadProgressListeners.delete(id);
+          if (!ok) {
+            restore();
+            return;
+          }
+          // Termina llena un instante para que se note que se completó.
+          update(1, 1);
+          fill.style.animation = 'none';
+          fill.style.width = '100%';
+          setTimeout(restore, 700);
+        },
+      };
     }
 
     // ---------- API de RedGifs ----------
@@ -511,7 +586,7 @@ export default defineContentScript({
       showToast(t('captureFrameStarted'));
     }
 
-    async function downloadGifChoice(id: string, choice: DownloadChoice, root: HTMLElement | null): Promise<void> {
+    async function downloadGifChoice(id: string, choice: DownloadChoice, root: HTMLElement | null, progressId?: string): Promise<void> {
       if (HAS_PREMIUM && choice === 'frame') {
         await downloadCurrentFrame(id, root);
         return;
@@ -526,7 +601,7 @@ export default defineContentScript({
       const domMeta = scrapeMeta(root ?? document.body);
       const apiMeta = result.metadata;
       const download = await send({
-        type: 'RG_DOWNLOAD', id, url, quality: choice as 'hd' | 'sd' | 'image',
+        type: 'RG_DOWNLOAD', id, url, quality: choice as 'hd' | 'sd' | 'image', progressId,
         filename: requestedFilename(root, choice),
         useOriginalFilename: originalFilenameEnabled,
         ...(HAS_PREMIUM && choice === 'image' ? {} : {
@@ -586,12 +661,12 @@ export default defineContentScript({
             event.stopPropagation();
             requestDownloadChoice(button, quality => {
               button.disabled = true;
-              label.textContent = t('preparing');
-              void downloadGifChoice(id, quality, player).catch(error => {
+              const progress = beginDownloadProgress(button, label);
+              void downloadGifChoice(id, quality, player, progress.id).then(() => progress.done(true)).catch(error => {
+                progress.done(false);
                 showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
               }).finally(() => {
                 button.disabled = false;
-                if (label.isConnected) label.textContent = t('download');
               });
             });
           });
@@ -649,11 +724,11 @@ export default defineContentScript({
           if (!id) return;
           requestDownloadChoice(button, quality => {
             button.disabled = true;
-            label.textContent = t('preparing');
-            void downloadGifChoice(id, quality, active?.root ?? null).catch(error => {
+            const progress = beginDownloadProgress(button, label);
+            void downloadGifChoice(id, quality, active?.root ?? null, progress.id).then(() => progress.done(true)).catch(error => {
+              progress.done(false);
               showToast(`✖ ${error instanceof Error ? error.message : t('downloadFailed')}`, 'error');
             }).finally(() => {
-              if (label.isConnected) label.textContent = t('download');
               button.disabled = false;
             });
           });
@@ -664,7 +739,7 @@ export default defineContentScript({
         button.title = t('downloadWithMetadata');
         button.setAttribute('aria-label', t('downloadVideo'));
         const label = button.querySelector<HTMLElement>('.label');
-        if (label && !button.disabled) label.textContent = t('download');
+        if (label && !button.disabled && !button.querySelector('.rg-progress-track')) label.textContent = t('download');
       }
       if (active?.id) item.dataset.gifId = active.id;
       const next = heartItem.nextElementSibling;
@@ -1243,6 +1318,10 @@ export default defineContentScript({
     // el modo selección. Se registra temprano para no perder el primer
     // toggle si el popup se abre apenas cargó la página.
     browser.runtime.onMessage.addListener((message: RgRequest, sender, sendResponse) => {
+      if (message.type === 'RG_DOWNLOAD_PROGRESS') {
+        downloadProgressListeners.get(message.progressId)?.(message.loaded, message.total);
+        return undefined;
+      }
       if (HAS_PREMIUM && message.type === 'RG_REDDIT_MENU_CHOOSE') {
         const action = pendingRedditMenuChoices.get(message.requestId);
         pendingRedditMenuChoices.delete(message.requestId);

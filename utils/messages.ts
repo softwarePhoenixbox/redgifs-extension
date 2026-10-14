@@ -29,7 +29,10 @@ export interface GridSelectionItem {
 }
 
 export type RgRequest =
-  | { type: 'RG_OFFSCREEN_PREPARE_BLOB'; url: string; metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null } }
+  | { type: 'RG_OFFSCREEN_PREPARE_BLOB'; url: string; metadata: { title?: string | null; author?: string | null; tags?: string[]; pageUrl?: string | null }; progressId?: string }
+  // Avance de una descarga: offscreen/background -> background -> content script del tab.
+  // total = 0 significa tamaño desconocido (barra indeterminada).
+  | { type: 'RG_DOWNLOAD_PROGRESS'; progressId: string; loaded: number; total: number }
   | { type: 'RG_OFFSCREEN_PREPARE_IMAGE_BLOB'; base64: string }
   | { type: 'RG_OFFSCREEN_REVOKE_BLOB'; blob_url: string }
   | { type: 'RG_DOWNLOAD_FRAME'; id: string; base64: string; filename?: string; useOriginalFilename?: boolean }
@@ -49,6 +52,7 @@ export type RgRequest =
       filename?: string;
       useOriginalFilename?: boolean;
       quality?: 'hd' | 'sd' | 'image';
+      progressId?: string; // el content script lo usa para pintar la barra de progreso
     }
   | {
       type: 'RG_SAVE_LINK';

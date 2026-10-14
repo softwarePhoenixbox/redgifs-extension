@@ -1,6 +1,7 @@
 import { premium } from '@premium';
 import { HAS_PREMIUM } from '../utils/edition';
 import { embedMp4Metadata } from '../utils/mp4-metadata';
+import { fetchBytesWithProgress } from '../utils/fetch-progress';
 import {
   deleteLink,
   getTotal,
@@ -25,6 +26,38 @@ const blobUrlsByDownloadId = new Map<number, { url: string; offscreen: boolean }
 const pendingAnchorBlobUrls = new Set<string>();
 const pendingFilenameSuggestions = new Map<string, { filename: string; timeout: ReturnType<typeof setTimeout> }>();
 const pendingRedditMenuTargets = new Map<string, { tabId: number; frameId: number }>();
+// progressId -> tab que pidió la descarga, para reenviarle el avance.
+const progressTargets = new Map<string, number>();
+
+function reportProgress(progressId: string | undefined, loaded: number, total: number): void {
+  if (!progressId) return;
+  const tabId = progressTargets.get(progressId);
+  if (tabId === undefined) return;
+  void browser.tabs.sendMessage(tabId, { type: 'RG_DOWNLOAD_PROGRESS', progressId, loaded, total } satisfies RgRequest).catch(() => undefined);
+}
+
+// Descarga directa (sin blob): el navegador baja el archivo; seguimos su avance
+// con downloads.search hasta que termine o se interrumpa.
+async function trackBrowserDownload(downloadId: number, progressId: string | undefined): Promise<void> {
+  if (!progressId) return;
+  for (let i = 0; i < 2400; i++) { // ~10 min como máximo
+    let item: Awaited<ReturnType<typeof browser.downloads.search>>[number] | undefined;
+    try {
+      [item] = await browser.downloads.search({ id: downloadId });
+    } catch {
+      return;
+    }
+    if (!item) return;
+    if (item.state === 'complete') {
+      const size = item.totalBytes > 0 ? item.totalBytes : item.bytesReceived;
+      reportProgress(progressId, size, size);
+      return;
+    }
+    if (item.state === 'interrupted') return;
+    reportProgress(progressId, item.bytesReceived, item.totalBytes > 0 ? item.totalBytes : 0);
+    await sleep(250);
+  }
+}
 let creatingOffscreenDocument: Promise<void> | null = null;
 
 // No se registra onDeterminingFilename a propósito: Chrome solo deja decidir el nombre final a UNA extensión
@@ -346,21 +379,26 @@ async function startVideoDownload(
   quality?: 'hd' | 'sd' | 'image',
   requestedName?: string,
   useOriginalFilename?: boolean,
+  progressId?: string,
 ): Promise<{ downloadId?: number; metadataEmbedded: boolean; metadataWarning?: string }> {
   // Media URLs carry RedGifs' canonical case-sensitive ID (e.g.
   // ZanyJudiciousRook-mobile.mp4); prefer it over lowercase /ifr/ IDs.
   const filename = downloadFilename(id, url, quality, requestedName, useOriginalFilename);
   const hasMetadata = Boolean(metadata.title || metadata.author || metadata.tags?.length || metadata.pageUrl);
   if (!hasMetadata) {
+    const downloadId = await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false });
+    await trackBrowserDownload(downloadId, progressId);
     return {
-      downloadId: await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false }),
+      downloadId,
       metadataEmbedded: false,
       metadataWarning: 'No se detectaron metadatos; el video se descargó sin metadatos.',
     };
   }
   if (!['mp4', 'm4v'].includes(extensionOf(url))) {
+    const downloadId = await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false });
+    await trackBrowserDownload(downloadId, progressId);
     return {
-      downloadId: await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false }),
+      downloadId,
       metadataEmbedded: false,
       metadataWarning: `El formato ${extensionOf(url)} no admite esta incrustación; se descargó sin metadatos.`,
     };
@@ -376,6 +414,7 @@ async function startVideoDownload(
         type: 'RG_OFFSCREEN_PREPARE_BLOB',
         url,
         metadata,
+        progressId,
       });
       if (!prepared?.ok || !prepared.blob_url) {
         throw new Error(prepared?.error ?? 'No se pudo preparar el MP4 en Chrome');
@@ -384,9 +423,7 @@ async function startVideoDownload(
       blobCreatedOffscreen = true;
     } else {
       if (typeof URL.createObjectURL !== 'function') throw new Error('Este navegador no permite preparar archivos MP4');
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`respuesta HTTP ${response.status}`);
-      const source = new Uint8Array(await response.arrayBuffer());
+      const source = await fetchBytesWithProgress(url, (loaded, total) => reportProgress(progressId, loaded, total));
       const tagged = embedMp4Metadata(source, metadata);
       const taggedBuffer = new ArrayBuffer(tagged.byteLength);
       new Uint8Array(taggedBuffer).set(tagged);
@@ -431,6 +468,7 @@ async function startVideoDownload(
     console.warn(`[RG Scroller] Descarga sin metadatos para ${id}:`, reason);
     // Si el parche de metadatos falla, no bloqueamos la descarga del video original.
     const downloadId = await downloadWithRetry({ url, filename, conflictAction: 'uniquify', saveAs: false });
+    await trackBrowserDownload(downloadId, progressId);
     return {
       downloadId,
       metadataEmbedded: false,
@@ -475,7 +513,7 @@ async function handle(msg: RgRequest): Promise<RgResponse> {
         useOriginalFilename: msg.useOriginalFilename ?? null,
       });
       // Descarga en el background y añade metadatos Xtra/QuickTime sin recodificar.
-      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality, msg.filename, msg.useOriginalFilename);
+      const result = await startVideoDownload(msg.id, msg.url, msg, msg.quality, msg.filename, msg.useOriginalFilename, msg.progressId);
       return {
         ok: true,
         downloadId: result.downloadId,
@@ -584,6 +622,16 @@ export default defineBackground(() => {
       });
       return true;
     }
+    // Avance enviado por el offscreen document (no tiene tab): se reenvía al tab que pidió la descarga.
+    if (message.type === 'RG_DOWNLOAD_PROGRESS') {
+      if (!sender.tab) reportProgress(message.progressId, message.loaded, message.total);
+      return undefined;
+    }
+    let progressId: string | undefined;
+    if (message.type === 'RG_DOWNLOAD' && message.progressId && sender.tab?.id !== undefined) {
+      progressId = message.progressId;
+      progressTargets.set(progressId, sender.tab.id);
+    }
     // runtime.onMessage solo recibe mensajes de esta extensión; no filtramos
     // sender.id porque Chrome puede omitirlo en algunos mensajes de content script.
     console.debug(`[RG Scroller] Background recibió ${message.type}`, {
@@ -598,6 +646,9 @@ export default defineBackground(() => {
       .catch((err: unknown) => {
         console.error(`[RG Scroller] Background falló en ${message.type}`, err);
         sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) } satisfies RgResponse);
+      })
+      .finally(() => {
+        if (progressId) progressTargets.delete(progressId);
       });
     // Patrón compatible con Chrome anterior a la respuesta Promise de MV3 y Firefox.
     return true;

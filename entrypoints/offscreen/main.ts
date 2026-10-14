@@ -1,5 +1,6 @@
 import { HAS_PREMIUM } from '../../utils/edition';
 import { embedMp4Metadata } from '../../utils/mp4-metadata';
+import { fetchBytesWithProgress } from '../../utils/fetch-progress';
 import type { RgRequest, RgResponse } from '../../utils/messages';
 
 browser.runtime.onMessage.addListener((message: RgRequest, _sender, sendResponse) => {
@@ -24,9 +25,13 @@ browser.runtime.onMessage.addListener((message: RgRequest, _sender, sendResponse
   if (message.type !== 'RG_OFFSCREEN_PREPARE_BLOB') return undefined;
 
   void (async (): Promise<RgResponse> => {
-    const response = await fetch(message.url);
-    if (!response.ok) throw new Error(`respuesta HTTP ${response.status}`);
-    const source = new Uint8Array(await response.arrayBuffer());
+    const { progressId } = message;
+    const source = await fetchBytesWithProgress(message.url, progressId
+      ? (loaded, total) => {
+          // El background reenvía este avance al tab que pidió la descarga.
+          void browser.runtime.sendMessage({ type: 'RG_DOWNLOAD_PROGRESS', progressId, loaded, total } satisfies RgRequest).catch(() => undefined);
+        }
+      : undefined);
     const tagged = embedMp4Metadata(source, message.metadata);
     const taggedBuffer = new ArrayBuffer(tagged.byteLength);
     new Uint8Array(taggedBuffer).set(tagged);
