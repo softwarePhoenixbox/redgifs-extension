@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.1.55...redgifs-extension-v0.2.0) (2026-10-14)
+
+
+### Features
+
+* add donwload button downlaod % ([c78c3fa](https://github.com/softwarePhoenixbox/redgifs-extension/commit/c78c3fafc565e5d4c25fdde27c97dbbb237937fb))
+
+
+### Bug Fixes
+
+* fixed use  vulneravitlies ([318c3c9](https://github.com/softwarePhoenixbox/redgifs-extension/commit/318c3c9932429e959d57b05375e79ce1d2d617a1))
+* remove upload drive sync firefox ([8205b82](https://github.com/softwarePhoenixbox/redgifs-extension/commit/8205b82ec83dc76e25b237748e53892b4f200648))
+* trigger release for extension fixes ([9295429](https://github.com/softwarePhoenixbox/redgifs-extension/commit/9295429dbc9d66333f5a8fc66e1bf51fe895cef2))
+
 ## [0.3.5](https://github.com/softwarePhoenixbox/redgifs-extension/compare/redgifs-extension-v0.3.4...redgifs-extension-v0.3.5) (2026-10-14)
 
 ### Changed
